@@ -1,5 +1,8 @@
 # DACSync
 
+[![Build](https://github.com/5uw1/purerate/actions/workflows/build.yml/badge.svg)](https://github.com/5uw1/purerate/actions/workflows/build.yml)
+[![Latest Release](https://img.shields.io/github/v/release/5uw1/purerate?label=latest%20release)](https://github.com/5uw1/purerate/releases/latest)
+
 A macOS menu-bar utility that watches Apple Music and automatically matches
 your audio output device's sample rate (and, optionally, bit depth) to
 whatever's actually playing — so macOS never has to resample Lossless or
