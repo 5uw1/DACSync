@@ -16,14 +16,29 @@ final class AppState: ObservableObject {
     @Published private(set) var launchAtLoginEnabled: Bool = LaunchAtLogin.isEnabled
     @Published private(set) var outputDevices: [AudioOutputDevice] = []
     @Published var targetDeviceID: AudioDeviceID? {
-        didSet { UserDefaults.standard.set(Int(targetDeviceID ?? 0), forKey: Keys.targetDevice) }
+        didSet {
+            UserDefaults.standard.set(Int(targetDeviceID ?? 0), forKey: Keys.targetDevice)
+            // Persist by name too — device IDs on this kind of hardware can
+            // churn (see CoreAudioController.deviceExists' doc comment),
+            // and more importantly the system's own "default output
+            // device" pointer isn't trustworthy to fall back on either: a
+            // nearby iPhone's Continuity microphone was observed
+            // intermittently becoming the system default output, which
+            // would otherwise hijack our fallback logic on next launch.
+            // Re-matching by name is what actually keeps this pointed at
+            // the device the user chose.
+            if let id = targetDeviceID, let name = outputDevices.first(where: { $0.id == id })?.name {
+                UserDefaults.standard.set(name, forKey: Keys.targetDeviceName)
+            }
+        }
     }
     @Published private(set) var currentSampleRate: Double?
     @Published private(set) var currentBitDepth: Int?
     /// Whether hog mode actually took, as opposed to `exclusiveAccessEnabled`
-    /// which only reflects the user's request. Some hardware (built-in Mac
-    /// speakers, notably) reports the request as successful but never
-    /// really takes ownership — see `CoreAudioController.setHogMode`.
+    /// which only reflects the user's request. Built-in Mac audio doesn't
+    /// support Hog Mode at all, and even on hardware that does, a write can
+    /// land on a device object mid-churn (see
+    /// `CoreAudioController.deviceExists`) — see `CoreAudioController.setHogMode`.
     @Published private(set) var exclusiveAccessActuallyHeld: Bool = false
     @Published private(set) var lastDetectedFormat: DetectedFormat?
     @Published private(set) var statusMessage: String = "Starting…"
@@ -60,6 +75,7 @@ final class AppState: ObservableObject {
         static let autoSwitch = "autoSwitchEnabled"
         static let exclusiveAccess = "exclusiveAccessEnabled"
         static let targetDevice = "targetDeviceID"
+        static let targetDeviceName = "targetDeviceName"
     }
 
     init() {
@@ -84,6 +100,37 @@ final class AppState: ObservableObject {
 
         audio.startWatchingDeviceListChanges { [weak self] in
             self?.handleDeviceListChanged()
+        }
+
+        // The log tap only sees *new* lines, so a track already playing
+        // before launch is otherwise invisible until the next track
+        // change — sync with reality immediately, then periodically as a
+        // safety net (covers e.g. resuming a paused track, which doesn't
+        // re-emit the format-change log lines a fresh track start does).
+        syncWithCurrentlyPlayingTrack()
+        appleScriptSyncTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.syncWithCurrentlyPlayingTrack() }
+        }
+    }
+
+    private var appleScriptSyncTimer: Timer?
+
+    private func syncWithCurrentlyPlayingTrack() {
+        Task {
+            // Only the blocking AppleScript call needs to leave the main
+            // actor; back on it afterward, `self` is used normally.
+            let rateTask = Task.detached { MusicScriptBridge.currentTrackSampleRate() }
+            guard let rate = await rateTask.value else {
+                return
+            }
+            // Doesn't tell us bit depth — only closes the sample-rate gap.
+            // A real log-detected event fills in bit depth once the next
+            // natural track change happens.
+            let format = DetectedFormat(
+                sampleRate: rate, bitDepth: nil, rendition: nil,
+                rawLine: "(synced via AppleScript)", timestamp: Date()
+            )
+            handle(format: format)
         }
     }
 
@@ -145,17 +192,57 @@ final class AppState: ObservableObject {
         launchAtLoginEnabled = LaunchAtLogin.isEnabled
     }
 
+    /// Tries to point `targetDeviceID` at whatever currently-enumerated
+    /// output device matches the persisted device name. Re-scans fresh
+    /// each call (rather than trusting a possibly-stale `outputDevices`)
+    /// since this is also used from a delayed retry.
+    @discardableResult
+    private func resolveByPersistedName() -> Bool {
+        guard let persistedName = UserDefaults.standard.string(forKey: Keys.targetDeviceName) else { return false }
+        outputDevices = (try? audio.outputDevices()) ?? outputDevices
+        guard let match = outputDevices.first(where: { $0.name == persistedName }) else { return false }
+        targetDeviceID = match.id
+        return true
+    }
+
     func refreshDevices() {
         do {
             outputDevices = try audio.outputDevices()
             // A device ID persisted from a previous session (or one this
             // session cached before a physical-format change re-enumerated
-            // it) can be stale — fall back rather than silently targeting
+            // it) can be stale — re-resolve rather than silently targeting
             // nothing real.
             if let id = targetDeviceID, !audio.deviceExists(id) {
                 targetDeviceID = nil
+                // Prefer matching the persisted device *name* over the
+                // system's own default-output pointer: on this kind of
+                // multi-device setup that pointer isn't trustworthy either
+                // (a nearby iPhone's Continuity microphone was observed
+                // intermittently becoming the system default output),
+                // and would otherwise hijack the target away from the
+                // device the user actually picked.
+                if !resolveByPersistedName() {
+                    // Releasing hog mode on quit is itself what makes some
+                    // DACs briefly reset their USB interface — relaunching
+                    // right after a quit can race that reset, catching the
+                    // device mid-disappearance. Retry shortly before
+                    // falling back to (the not fully trustworthy) system
+                    // default.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                        guard let self else { return }
+                        if !self.resolveByPersistedName(), self.targetDeviceID == nil {
+                            self.targetDeviceID = try? self.audio.defaultOutputDevice().id
+                        }
+                        if self.exclusiveAccessEnabled {
+                            self.applyHogMode()
+                        }
+                    }
+                }
             }
-            if targetDeviceID == nil {
+            if targetDeviceID == nil, UserDefaults.standard.string(forKey: Keys.targetDeviceName) == nil {
+                // No prior device preference at all (first launch) — fine
+                // to trust system default here since there's no better
+                // signal to retry toward.
                 targetDeviceID = try? audio.defaultOutputDevice().id
             }
             if let id = targetDeviceID {
@@ -182,6 +269,8 @@ final class AppState: ObservableObject {
     /// outlive the app.
     func stopMonitoring() {
         monitor.stop()
+        appleScriptSyncTimer?.invalidate()
+        appleScriptSyncTimer = nil
         if exclusiveAccessActuallyHeld, let deviceID = targetDeviceID {
             try? audio.setHogMode(of: deviceID, owned: false)
         }

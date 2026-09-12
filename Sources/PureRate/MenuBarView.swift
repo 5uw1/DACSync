@@ -34,7 +34,7 @@ struct MenuBarView: View {
                     .foregroundStyle(.secondary)
             }
             if state.exclusiveAccessEnabled && !state.exclusiveAccessActuallyHeld {
-                Text("Exclusive access not held by this device — bit depth won't switch (common for built-in speakers; try an external DAC)")
+                Text("Exclusive access not held by this device yet — bit depth won't switch until it is (built-in Mac audio never supports this; retrying automatically on an external DAC)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             } else if !state.exclusiveAccessEnabled {

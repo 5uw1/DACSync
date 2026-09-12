@@ -33,11 +33,15 @@ final class CoreAudioController {
 
     // MARK: Device discovery
 
-    /// Whether `id` still refers to a live device. Discovered the hard way:
-    /// changing a stream's *physical* format (bit depth) — unlike a plain
-    /// nominal sample rate change — can make CoreAudio re-enumerate a
-    /// device under a brand new AudioDeviceID, silently orphaning any
-    /// previously cached one.
+    /// Whether `id` still refers to a live device. Discovered the hard way,
+    /// verified against a real external DAC (a FiiO K13 R2R): changing a
+    /// stream's *physical* format (bit depth) — unlike a plain nominal
+    /// sample rate change — can make CoreAudio re-enumerate the device
+    /// under a brand new AudioDeviceID. Engaging or releasing Hog Mode was
+    /// separately observed doing the same thing on that hardware (likely
+    /// the DAC's USB interface briefly resetting for an internal
+    /// relay/clock reconfiguration) — either way, a previously cached ID
+    /// can silently go stale.
     func deviceExists(_ id: AudioDeviceID) -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyDeviceIsAlive,
@@ -364,11 +368,13 @@ final class CoreAudioController {
             throw ControllerError.propertyWriteFailed("kAudioDevicePropertyHogMode", status)
         }
 
-        // Some hardware (built-in Mac speakers, notably) reports success
-        // for this write but never actually takes ownership — silently
-        // discovered while testing this against a MacBook's built-in
-        // output, which also triggered a spurious device re-enumeration in
-        // the process. Read the property back rather than trusting noErr.
+        // Some hardware reports success for this write but never actually
+        // takes ownership (built-in Mac audio, notably, doesn't support
+        // Hog Mode at all). Read the property back rather than trusting
+        // noErr — verified this matters even on real external DACs mid
+        // device-ID churn (see CoreAudioController.deviceExists' doc
+        // comment): a write can land on a device object that's already on
+        // its way out.
         if owned {
             var readback = pid_t(-1)
             var readbackSize = UInt32(MemoryLayout<pid_t>.size)
