@@ -26,17 +26,29 @@ no code from that project is reused here, only the general technique) — is:
    output device so the shared system mixer can't reopen it at a mismatched
    rate mid-track.
 
-### Known limitation — the log line patterns are unverified
+### Log line patterns — verified against real output
 
-Apple doesn't document these log strings and they can change between macOS
-releases. `FormatLineParser` ships with best-effort regexes for `"44.1kHz"` /
-`"24-bit"`-style text. If `PureRate` isn't detecting changes on your machine:
+`FormatLineParser`'s regexes were captured live from Music.app on macOS 26.6
+(see the commit history) while switching between an AAC track, a
+44.1kHz/16-bit Lossless track, and a 96kHz/24-bit Hi-Res Lossless one — not
+guessed. Confirmed end-to-end: the app switched a real output device from
+44.1kHz to 48kHz automatically the instant a matching track started.
+
+The three matched lines (`fpfs_ReportAudioPlaybackThroughFigLog`'s
+`[BitDepth]`/`[SampleRate]` tags, `ACAppleLosslessDecoder`'s "Input format"
+line, and the `ampplay` `mediaFormatinfo` line) only ever fire while Music is
+actually decoding ALAC — the AAC track produced none of them — so a match is
+inherently a lossless-playback signal.
+
+Apple doesn't document these strings, though, so a future macOS/Music
+update can change them. If `PureRate` stops detecting changes:
 
 1. Run the app, open the menu, enable **Show raw log matches**.
 2. Play a Lossless/Hi-Res track in Apple Music and watch for lines there.
-3. If nothing shows up, capture manually:
+3. If nothing shows up, recapture manually:
    ```bash
-   log stream --style compact --level info --predicate 'process == "Music"'
+   log stream --style compact --level debug --predicate \
+     'process == "Music" AND (eventMessage CONTAINS "BitDepth" OR eventMessage CONTAINS "ACAppleLosslessDecoder" OR eventMessage CONTAINS "PBAudioFormat" OR eventMessage CONTAINS "mediaFormatinfo")'
    ```
    while switching tracks, and adjust the regexes in
    `Sources/PureRate/PlaybackFormatMonitor.swift` to match what you see.
