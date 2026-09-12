@@ -10,6 +10,10 @@ struct MenuBarView: View {
 
             Toggle("Auto-switch sample rate", isOn: $state.autoSwitchEnabled)
             Toggle("Take exclusive access (hog mode)", isOn: $state.exclusiveAccessEnabled)
+            Toggle("Launch at login", isOn: Binding(
+                get: { state.launchAtLoginEnabled },
+                set: { state.setLaunchAtLogin($0) }
+            ))
 
             Divider()
 

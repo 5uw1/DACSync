@@ -13,6 +13,7 @@ final class AppState: ObservableObject {
             applyHogMode()
         }
     }
+    @Published private(set) var launchAtLoginEnabled: Bool = LaunchAtLogin.isEnabled
     @Published private(set) var outputDevices: [AudioOutputDevice] = []
     @Published var targetDeviceID: AudioDeviceID? {
         didSet { UserDefaults.standard.set(Int(targetDeviceID ?? 0), forKey: Keys.targetDevice) }
@@ -44,6 +45,15 @@ final class AppState: ObservableObject {
         // opens the menu, which would otherwise leave monitoring off by
         // default for however long until that first click.
         startMonitoring()
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        if let error = LaunchAtLogin.setEnabled(enabled) {
+            statusMessage = "Launch at Login failed: \(error.localizedDescription)"
+        }
+        // Reflect the system's actual status either way, rather than
+        // assuming the request succeeded.
+        launchAtLoginEnabled = LaunchAtLogin.isEnabled
     }
 
     func refreshDevices() {

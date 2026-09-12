@@ -63,6 +63,8 @@ update can change them. If `PureRate` stops detecting changes:
 
 ## Building & running
 
+For development (rebuild-and-relaunch loop):
+
 ```bash
 swift build
 swift run
@@ -72,17 +74,40 @@ The app lives in the menu bar (waveform icon) — no Dock icon, no windows.
 Open the menu to pick the target output device, toggle auto-switch and
 exclusive access, and watch the detected format.
 
-For a distributable `.app` (code signing, custom icon, Login Item), open
-`Package.swift` in Xcode and use Product → Archive, or wrap the built
-executable in an `.app` bundle with your own `Info.plist`.
+Note: `swift run` does **not** support the Launch at Login toggle —
+`SMAppService.mainApp` (`LaunchAtLogin.swift`) only works when PureRate is
+actually running as a bundled `.app`. Use the packaged build below to test
+that.
+
+### Packaged `.app` (for real use / Login Item)
+
+```bash
+scripts/build-app.sh
+open build/PureRate.app
+```
+
+This builds a release binary and hand-assembles `build/PureRate.app`
+(`Contents/MacOS`, `Contents/Info.plist`, ad-hoc code signature) — there's
+no Xcode project here to Archive, since this is a plain SwiftPM package.
+To actually run at login, move `PureRate.app` somewhere stable (e.g.
+`/Applications`) first, then toggle **Launch at login** from the menu; it
+shows up under System Settings → General → Login Items afterward.
+
+If you have an Apple Developer ID, sign with that instead of ad hoc
+(edit the `codesign` line in `scripts/build-app.sh`) — a Login Item
+registered under a real signing identity survives rebuilds more reliably
+than one registered under an ad-hoc signature, which changes on every
+build.
 
 ## Roadmap
 
 - [x] macOS: detect Apple Music format via log scraping, auto-switch output
       device sample rate via CoreAudio (this repo, phase 1)
+- [x] macOS: proper `.app` packaging (`scripts/build-app.sh`) and a
+      Launch at Login toggle (`SMAppService.mainApp`)
 - [ ] macOS: bit-depth-aware exclusive-mode stream format selection where
       the DAC exposes more than one physical format
-- [ ] macOS: Login Item / launch-at-login, proper `.app` packaging & signing
+- [ ] macOS: custom app icon, Developer ID signing & notarization
 - [ ] Windows: WASAPI exclusive-mode equivalent (C++ or C#), format
       detection strategy TBD per source app (no Apple Music on Windows —
       likely Tidal/Qobuz-specific approaches)
