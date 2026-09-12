@@ -10,6 +10,11 @@ struct MenuBarView: View {
 
             Toggle("Auto-switch sample rate", isOn: $state.autoSwitchEnabled)
             Toggle("Take exclusive access (hog mode)", isOn: $state.exclusiveAccessEnabled)
+            if state.exclusiveAccessEnabled {
+                Text("⚠️ May silence audio: DACSync isn't the app playing your music, so holding exclusive access can block Apple Music from using the device. Off is safest — this doesn't persist between launches.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
             Toggle("Launch at login", isOn: Binding(
                 get: { state.launchAtLoginEnabled },
                 set: { state.setLaunchAtLogin($0) }

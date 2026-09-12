@@ -12,11 +12,10 @@ final class AppState: ObservableObject {
             }
         }
     }
+    // Not persisted — see the comment on this property's assignment in
+    // init().
     @Published var exclusiveAccessEnabled: Bool = false {
-        didSet {
-            UserDefaults.standard.set(exclusiveAccessEnabled, forKey: Keys.exclusiveAccess)
-            applyHogMode()
-        }
+        didSet { applyHogMode() }
     }
     @Published private(set) var launchAtLoginEnabled: Bool = LaunchAtLogin.isEnabled
     @Published private(set) var outputDevices: [AudioOutputDevice] = []
@@ -118,14 +117,19 @@ final class AppState: ObservableObject {
 
     private enum Keys {
         static let autoSwitch = "autoSwitchEnabled"
-        static let exclusiveAccess = "exclusiveAccessEnabled"
         static let targetDevice = "targetDeviceID"
         static let targetDeviceName = "targetDeviceName"
     }
 
     init() {
         autoSwitchEnabled = UserDefaults.standard.object(forKey: Keys.autoSwitch) as? Bool ?? true
-        exclusiveAccessEnabled = UserDefaults.standard.bool(forKey: Keys.exclusiveAccess)
+        // Deliberately NOT restored from UserDefaults — exclusive access
+        // silences audio by design when it's held by DACSync instead of
+        // whatever's actually playing (see the MenuBarView warning next to
+        // this toggle). Every session starts with it off; turning it on is
+        // a conscious per-session choice, not something that should
+        // silently carry over and surprise a future launch.
+        exclusiveAccessEnabled = false
         let savedDevice = UserDefaults.standard.integer(forKey: Keys.targetDevice)
         targetDeviceID = savedDevice == 0 ? nil : AudioDeviceID(savedDevice)
 
@@ -136,12 +140,6 @@ final class AppState: ObservableObject {
         // opens the menu, which would otherwise leave monitoring off by
         // default for however long until that first click.
         startMonitoring()
-        // didSet doesn't fire for a property's first assignment, so
-        // restoring exclusiveAccessEnabled = true from UserDefaults above
-        // silently would never actually take hog mode — apply it explicitly.
-        if exclusiveAccessEnabled {
-            applyHogMode()
-        }
 
         audio.startWatchingDeviceListChanges { [weak self] in
             self?.handleDeviceListChanged()
