@@ -28,9 +28,19 @@ struct MenuBarView: View {
             .labelsHidden()
 
             if let rate = state.currentSampleRate {
-                Text("Device rate: \(Int(rate)) Hz")
+                let bitText = state.currentBitDepth.map { "\($0)-bit / " } ?? ""
+                Text("Device: \(bitText)\(Int(rate)) Hz")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            if state.exclusiveAccessEnabled && !state.exclusiveAccessActuallyHeld {
+                Text("Exclusive access not held by this device — bit depth won't switch (common for built-in speakers; try an external DAC)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else if !state.exclusiveAccessEnabled {
+                Text("Bit depth only switches under exclusive access")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
 
             if let format = state.lastDetectedFormat {

@@ -15,6 +15,7 @@ final class CoreAudioController {
         case propertyReadFailed(String, OSStatus)
         case propertyWriteFailed(String, OSStatus)
         case noOutputStreams
+        case hogModeNotSupported
 
         var errorDescription: String? {
             switch self {
@@ -24,11 +25,43 @@ final class CoreAudioController {
                 return "Failed to write \(prop) (OSStatus \(status))"
             case .noOutputStreams:
                 return "Device has no output streams"
+            case .hogModeNotSupported:
+                return "This device doesn't hold exclusive access (common for built-in speakers — try an external USB DAC)"
             }
         }
     }
 
     // MARK: Device discovery
+
+    /// Whether `id` still refers to a live device. Discovered the hard way:
+    /// changing a stream's *physical* format (bit depth) — unlike a plain
+    /// nominal sample rate change — can make CoreAudio re-enumerate a
+    /// device under a brand new AudioDeviceID, silently orphaning any
+    /// previously cached one.
+    func deviceExists(_ id: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var alive: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(id, &address, 0, nil, &size, &alive)
+        return status == noErr && alive != 0
+    }
+
+    /// Invokes `handler` (on the main queue) whenever the system's set of
+    /// audio devices changes — added/removed/re-enumerated.
+    func startWatchingDeviceListChanges(_ handler: @escaping () -> Void) {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main) { _, _ in
+            handler()
+        }
+    }
 
     func defaultOutputDevice() throws -> AudioOutputDevice {
         var deviceID = AudioDeviceID(0)
@@ -182,6 +215,137 @@ final class CoreAudioController {
         return available.min(by: { abs($0 - sourceRate) < abs($1 - sourceRate) }) ?? sourceRate
     }
 
+    // MARK: Bit depth (per-stream physical format)
+
+    /// A DAC's *nominal sample rate* (above) is a device-wide property, but
+    /// bit depth lives on each output `AudioStreamID` as part of its
+    /// "physical format" — the actual hardware wire format, as opposed to
+    /// the Float32 format CoreAudio's shared mixer always uses internally.
+    /// Many USB DACs expose the same sample rate at more than one bit depth
+    /// (e.g. 16-bit and 24-bit at 44.1kHz); picking the one that matches
+    /// the source avoids the mixer silently padding/truncating samples.
+
+    func outputStreamIDs(of deviceID: AudioDeviceID) throws -> [AudioStreamID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreams,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        var status = AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &size)
+        guard status == noErr else {
+            throw ControllerError.propertyReadFailed("kAudioDevicePropertyStreams size", status)
+        }
+        let count = Int(size) / MemoryLayout<AudioStreamID>.size
+        guard count > 0 else { throw ControllerError.noOutputStreams }
+        var streamIDs = [AudioStreamID](repeating: 0, count: count)
+        status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &streamIDs)
+        guard status == noErr else {
+            throw ControllerError.propertyReadFailed("kAudioDevicePropertyStreams", status)
+        }
+        return streamIDs
+    }
+
+    func physicalFormat(of streamID: AudioStreamID) throws -> AudioStreamBasicDescription {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioStreamPropertyPhysicalFormat,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var asbd = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let status = AudioObjectGetPropertyData(streamID, &address, 0, nil, &size, &asbd)
+        guard status == noErr else {
+            throw ControllerError.propertyReadFailed("kAudioStreamPropertyPhysicalFormat", status)
+        }
+        return asbd
+    }
+
+    func availablePhysicalFormats(of streamID: AudioStreamID) throws -> [AudioStreamRangedDescription] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioStreamPropertyAvailablePhysicalFormats,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        var status = AudioObjectGetPropertyDataSize(streamID, &address, 0, nil, &size)
+        guard status == noErr else {
+            throw ControllerError.propertyReadFailed("kAudioStreamPropertyAvailablePhysicalFormats size", status)
+        }
+        let count = Int(size) / MemoryLayout<AudioStreamRangedDescription>.size
+        var formats = [AudioStreamRangedDescription](repeating: AudioStreamRangedDescription(), count: count)
+        status = AudioObjectGetPropertyData(streamID, &address, 0, nil, &size, &formats)
+        guard status == noErr else {
+            throw ControllerError.propertyReadFailed("kAudioStreamPropertyAvailablePhysicalFormats", status)
+        }
+        return formats
+    }
+
+    /// Current bit depth of the device's first output stream, for display.
+    func currentBitDepth(of deviceID: AudioDeviceID) -> Int? {
+        guard let streamID = try? outputStreamIDs(of: deviceID).first,
+              let asbd = try? physicalFormat(of: streamID),
+              asbd.mBitsPerChannel > 0 else { return nil }
+        return Int(asbd.mBitsPerChannel)
+    }
+
+    /// Sets every output stream's physical format to `bitDepth` at
+    /// `sampleRate` where the device offers that combination, preferring an
+    /// exact bit-depth match, then the closest higher depth (never
+    /// truncating below the source), then the closest depth available.
+    /// Streams with no linear-PCM format at `sampleRate` are left alone.
+    @discardableResult
+    func matchBitDepth(of deviceID: AudioDeviceID, sampleRate: Double, bitDepth: Int) throws -> Int? {
+        var appliedBitDepth: Int?
+
+        for streamID in try outputStreamIDs(of: deviceID) {
+            let candidates = try availablePhysicalFormats(of: streamID).filter { ranged in
+                ranged.mFormat.mFormatID == kAudioFormatLinearPCM
+                    && ranged.mFormat.mBitsPerChannel > 0
+                    && sampleRate >= ranged.mSampleRateRange.mMinimum - 1
+                    && sampleRate <= ranged.mSampleRateRange.mMaximum + 1
+            }
+            guard !candidates.isEmpty else { continue }
+
+            let target = bestBitDepthMatch(bitDepth, in: candidates)
+            var desired = target.mFormat
+            desired.mSampleRate = sampleRate
+
+            let current = try physicalFormat(of: streamID)
+            if current.mSampleRate == desired.mSampleRate, current.mBitsPerChannel == desired.mBitsPerChannel {
+                appliedBitDepth = Int(current.mBitsPerChannel)
+                continue
+            }
+
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioStreamPropertyPhysicalFormat,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            let size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+            let status = AudioObjectSetPropertyData(streamID, &address, 0, nil, size, &desired)
+            guard status == noErr else {
+                throw ControllerError.propertyWriteFailed("kAudioStreamPropertyPhysicalFormat", status)
+            }
+            appliedBitDepth = Int(desired.mBitsPerChannel)
+        }
+
+        return appliedBitDepth
+    }
+
+    private func bestBitDepthMatch(
+        _ bitDepth: Int, in candidates: [AudioStreamRangedDescription]
+    ) -> AudioStreamRangedDescription {
+        if let exact = candidates.first(where: { $0.mFormat.mBitsPerChannel == UInt32(bitDepth) }) {
+            return exact
+        }
+        let higher = candidates.filter { $0.mFormat.mBitsPerChannel >= UInt32(bitDepth) }
+        if let nearestHigher = higher.min(by: { $0.mFormat.mBitsPerChannel < $1.mFormat.mBitsPerChannel }) {
+            return nearestHigher
+        }
+        return candidates.max(by: { $0.mFormat.mBitsPerChannel < $1.mFormat.mBitsPerChannel })!
+    }
+
     // MARK: Hog mode (exclusive access)
 
     /// Taking "hog mode" stops other processes/the system mixer from opening
@@ -190,7 +354,7 @@ final class CoreAudioController {
     func setHogMode(of id: AudioDeviceID, owned: Bool) throws {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyHogMode,
-            mScope: kAudioObjectPropertyScopeOutput,
+            mScope: kAudioDevicePropertyScopeOutput,
             mElement: kAudioObjectPropertyElementMain
         )
         var pid = owned ? pid_t(ProcessInfo.processInfo.processIdentifier) : pid_t(-1)
@@ -198,6 +362,20 @@ final class CoreAudioController {
         let status = AudioObjectSetPropertyData(id, &address, 0, nil, size, &pid)
         guard status == noErr else {
             throw ControllerError.propertyWriteFailed("kAudioDevicePropertyHogMode", status)
+        }
+
+        // Some hardware (built-in Mac speakers, notably) reports success
+        // for this write but never actually takes ownership — silently
+        // discovered while testing this against a MacBook's built-in
+        // output, which also triggered a spurious device re-enumeration in
+        // the process. Read the property back rather than trusting noErr.
+        if owned {
+            var readback = pid_t(-1)
+            var readbackSize = UInt32(MemoryLayout<pid_t>.size)
+            let readStatus = AudioObjectGetPropertyData(id, &address, 0, nil, &readbackSize, &readback)
+            guard readStatus == noErr, readback == ProcessInfo.processInfo.processIdentifier else {
+                throw ControllerError.hogModeNotSupported
+            }
         }
     }
 }

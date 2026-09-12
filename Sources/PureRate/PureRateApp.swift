@@ -2,9 +2,18 @@ import Foundation
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    var state: AppState?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menu-bar-only app: no Dock icon, no app switcher entry.
         NSApp.setActivationPolicy(.accessory)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Without this the log-stream child process (and hog mode, if
+        // held) outlives a graceful quit — Foundation doesn't kill a
+        // Process's children automatically.
+        state?.stopMonitoring()
     }
 }
 
@@ -33,7 +42,9 @@ struct PureRateApp: App {
             print("OK: launchAtLoginEnabled=\(LaunchAtLogin.isEnabled) status=\(LaunchAtLogin.statusDescription)")
             exit(0)
         }
-        _state = StateObject(wrappedValue: AppState())
+        let state = AppState()
+        _state = StateObject(wrappedValue: state)
+        _appDelegate.wrappedValue.state = state
     }
 
     var body: some Scene {

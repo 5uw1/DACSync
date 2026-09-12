@@ -25,6 +25,37 @@ no code from that project is reused here, only the general technique) — is:
 3. **Hold the device** (optional): "hog mode" takes exclusive access to the
    output device so the shared system mixer can't reopen it at a mismatched
    rate mid-track.
+4. **Match bit depth** (optional, needs exclusive access): sets each output
+   stream's *physical* format (`kAudioStreamPropertyPhysicalFormat`) — the
+   actual hardware wire format, separate from the device-wide nominal
+   sample rate — to the source's bit depth where the DAC offers more than
+   one (`CoreAudioController.matchBitDepth`).
+
+### Exclusive access / bit depth: built for external DACs, not built-in speakers
+
+Verified live against this Mac's **built-in speakers**: they report success
+for the Hog Mode request but never actually take ownership, and attempting
+it triggers a spurious device re-enumeration (the AudioDeviceID changes
+mid-session — see below). `setHogMode` now reads the property back rather
+than trusting the write's status, and surfaces
+`ControllerError.hogModeNotSupported` / `exclusiveAccessActuallyHeld` in the
+UI instead of silently claiming success. Bit depth switching is gated on
+that actually-held state, not just the toggle, so it won't keep trying on
+hardware that can't do it. Sample-rate-only switching (no hog mode) doesn't
+have this problem and was confirmed reliable across many real tracks.
+**This means exclusive access + bit depth switching wants a real external
+USB/Thunderbolt DAC** — the kind of hardware Hog Mode is actually designed
+for — not a laptop's internal audio.
+
+### Device re-enumeration
+
+Also discovered while testing bit depth: changing a stream's *physical*
+format can make CoreAudio re-enumerate the device under a **new
+AudioDeviceID**, unlike a plain nominal-rate change. `AppState` now watches
+`kAudioHardwarePropertyDevices` and re-resolves `targetDeviceID` by name
+when the cached ID goes stale (`CoreAudioController.deviceExists`,
+`AppState.handleDeviceListChanged`) — otherwise every switch after the
+first re-enumeration would silently fail.
 
 ### Log line patterns — verified against real output
 
@@ -105,8 +136,10 @@ build.
       device sample rate via CoreAudio (this repo, phase 1)
 - [x] macOS: proper `.app` packaging (`scripts/build-app.sh`) and a
       Launch at Login toggle (`SMAppService.mainApp`)
-- [ ] macOS: bit-depth-aware exclusive-mode stream format selection where
-      the DAC exposes more than one physical format
+- [x] macOS: bit-depth-aware exclusive-mode stream format selection
+      (`CoreAudioController.matchBitDepth`) — needs a real external DAC,
+      see above; verified correct against a device that actually holds
+      Hog Mode is still outstanding (none available to test with)
 - [ ] macOS: custom app icon, Developer ID signing & notarization
 - [ ] Windows: WASAPI exclusive-mode equivalent (C++ or C#), format
       detection strategy TBD per source app (no Apple Music on Windows —
