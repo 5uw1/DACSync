@@ -1,3 +1,5 @@
+<img src="docs/logo.png" alt="DACSync logo" width="96" height="96">
+
 # DACSync
 
 [![Build](https://github.com/5uw1/purerate/actions/workflows/build.yml/badge.svg)](https://github.com/5uw1/purerate/actions/workflows/build.yml)
