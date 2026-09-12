@@ -28,21 +28,29 @@ see [Roadmap](#roadmap).
 
 ## Quick start
 
-There's no pre-built download yet — build it from source (it's small and
-fast to build):
+**Download:** grab the latest `DACSync-macOS.zip` from
+[Releases](https://github.com/5uw1/purerate/releases), unzip it, and move
+`DACSync.app` to `/Applications`.
+
+**Or build from source** (small, fast to build):
 
 ```bash
 git clone https://github.com/5uw1/purerate.git
 cd purerate
 scripts/build-app.sh
+mv build/DACSync.app /Applications/
 ```
 
-Then move the built app somewhere stable and launch it:
+Then launch it:
 
 ```bash
-mv build/DACSync.app /Applications/
 open /Applications/DACSync.app
 ```
+
+The build isn't notarized (see [Roadmap](#roadmap)), so the first launch
+will likely be blocked by Gatekeeper as "unidentified developer." Right-click
+the app in Finder and choose **Open** (rather than double-clicking) to get
+past that — you only need to do this once.
 
 A `96K`-style label appears in your menu bar (no Dock icon — it's a
 background utility). Click it to open the menu.
@@ -263,7 +271,12 @@ macOS caches app icons aggressively — after installing a rebuilt `.app`,
 - [x] macOS: restore original format when auto-switch/exclusive access is
       turned off, instead of leaving the device stuck
 - [x] macOS: visible switch history log in the menu
-- [ ] macOS: Developer ID signing & notarization
+- [x] CI: GitHub Actions build (`.github/workflows/build.yml`) — tag pushes
+      (`v*`) publish a Release with a downloadable `DACSync-macOS.zip`;
+      pushes to `main` upload the same zip as a workflow artifact for
+      testing a build without cutting a release
+- [ ] macOS: Developer ID signing & notarization (would remove the
+      Gatekeeper "unidentified developer" prompt on first launch)
 - [ ] Windows: WASAPI exclusive-mode equivalent (C++ or C#), format
       detection strategy TBD per source app (no Apple Music on Windows —
       likely Tidal/Qobuz-specific approaches)

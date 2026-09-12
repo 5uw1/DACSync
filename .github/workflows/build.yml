@@ -1,0 +1,85 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      # Tag pushes (v0.1.1, v0.1.1-rc1, v0.1.1-pre0, ...): stamp Info.plist to
+      # the tag's exact version, and mark the Release as a prerelease whenever
+      # the tag has a prerelease suffix (anything after a hyphen).
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $TAG_VERSION" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Resources/Info.plist
+          if [[ "$TAG_VERSION" == *-* ]]; then
+            echo "RELEASE_TYPE=prerelease" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TYPE=release" >> "$GITHUB_ENV"
+          fi
+
+      # Everything else (push to main, or a manual run): stamp an auto-incrementing
+      # dev version instead, e.g. 0.1.0-dev.42, so every build is uniquely numbered.
+      - name: Set dev version
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        run: |
+          CURRENT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${CURRENT_VERSION}-dev.${{ github.run_number }}" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Resources/Info.plist
+
+      - name: Build .app
+        run: scripts/build-app.sh
+
+      # ditto (not plain zip) preserves the bundle's resource forks/xattrs
+      # correctly — the standard way to zip a macOS .app for distribution.
+      - name: Zip app bundle
+        run: |
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent DACSync.app DACSync-macOS.zip
+
+      # Tag pushes: create the GitHub Release with notes auto-generated from
+      # commits since the last tag (GitHub's built-in "What's Changed" + full
+      # changelog link — no changelog file to maintain), and attach the zip.
+      - name: Create release with auto-generated notes
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [ "$RELEASE_TYPE" = "prerelease" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          gh release create "$GITHUB_REF_NAME" build/DACSync-macOS.zip \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            $PRERELEASE_FLAG
+
+      # Push to main / manual runs: upload the zip as a workflow artifact only
+      # — never published as a public release.
+      - name: Upload build artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: DACSync-macOS
+          path: build/DACSync-macOS.zip
