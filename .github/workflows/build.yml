@@ -77,9 +77,16 @@ jobs:
 
           # Prepend the new keychain to the search list rather than
           # replacing it, so codesign can still find the runner's other
-          # (unrelated) default keychains if it needs to. mapfile avoids
-          # the word-splitting issue of a bare unquoted $(...) expansion.
-          mapfile -t EXISTING_KEYCHAINS < <(security list-keychains -d user | sed 's/^ *"//;s/" *$//')
+          # (unrelated) default keychains if it needs to. A plain
+          # while-read loop avoids both the word-splitting issue of a bare
+          # unquoted $(...) expansion and mapfile, which doesn't exist in
+          # bash 3.2 — what macOS's default /bin/bash still is (Apple
+          # hasn't shipped a newer one since bash went GPLv3). Confirmed
+          # by an actual CI failure: "mapfile: command not found".
+          EXISTING_KEYCHAINS=()
+          while IFS= read -r keychain; do
+            EXISTING_KEYCHAINS+=("$keychain")
+          done < <(security list-keychains -d user | sed 's/^ *"//;s/" *$//')
           security list-keychains -d user -s "$KEYCHAIN_PATH" "${EXISTING_KEYCHAINS[@]}"
 
           rm -f "$RUNNER_TEMP/cert.p12"
