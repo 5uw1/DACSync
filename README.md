@@ -2,8 +2,8 @@
 
 # DACSync
 
-[![Build](https://github.com/5uw1/purerate/actions/workflows/build.yml/badge.svg)](https://github.com/5uw1/purerate/actions/workflows/build.yml)
-[![Latest Release](https://img.shields.io/github/v/release/5uw1/purerate?label=latest%20release)](https://github.com/5uw1/purerate/releases/latest)
+[![Build](https://github.com/5uw1/DACSync/actions/workflows/build.yml/badge.svg)](https://github.com/5uw1/DACSync/actions/workflows/build.yml)
+[![Latest Release](https://img.shields.io/github/v/release/5uw1/DACSync?label=latest%20release)](https://github.com/5uw1/DACSync/releases/latest)
 
 A macOS menu-bar utility that watches Apple Music and automatically matches
 your audio output device's sample rate (and, optionally, bit depth) to
@@ -44,14 +44,14 @@ Click it to open the menu:
 ## Quick start
 
 **Download:** grab the latest `DACSync-macOS.zip` from
-[Releases](https://github.com/5uw1/purerate/releases), unzip it, and move
+[Releases](https://github.com/5uw1/DACSync/releases), unzip it, and move
 `DACSync.app` to `/Applications`.
 
 **Or build from source** (small, fast to build):
 
 ```bash
-git clone https://github.com/5uw1/purerate.git
-cd purerate
+git clone https://github.com/5uw1/DACSync.git
+cd DACSync
 scripts/build-app.sh
 mv build/DACSync.app /Applications/
 ```
