@@ -82,18 +82,23 @@ dotnet publish -r win-x64 --self-contained -c Release -o publish
   show live text the way the macOS menu bar item shows e.g. `96K`, so
   status goes in the icon's tooltip instead.
 
-CI (`.github/workflows/windows-build.yml`) builds and publishes on every
-push touching `windows/`, uploading the result as a workflow artifact —
-not yet attached to GitHub Releases like the macOS build is, since this
-hasn't been confirmed working on real hardware yet.
+CI (`.github/workflows/build.yml`, the same workflow as macOS — a
+`build-windows` job alongside `build-macos`) builds and publishes on
+every push and tag, self-contained for `win-x64`. Tagged releases attach
+`DACSync-windows.zip` to the GitHub Release alongside the macOS build —
+**on the strength of "compiles and publishes cleanly," not "confirmed
+working on Windows,"** since the caveats above are still real. Treat a
+release's Windows asset as a build to try, not a finished product, until
+someone's actually run it.
 
 ## Roadmap
 
 - [ ] Actually run this on a Windows machine and fix whatever the COM
       interop gets wrong
 - [ ] Real app icon (`.ico`)
-- [ ] Once verified: wire into the release workflow so tagged releases
-      ship a Windows build alongside the macOS one
+- [x] Wire into the release workflow — tagged releases now ship
+      `DACSync-windows.zip` alongside the macOS build (done ahead of
+      runtime verification, at the user's request; see the caveat above)
 - [ ] Code signing (Authenticode) — unsigned `.exe`s trigger a Windows
       SmartScreen warning on first run, the rough equivalent of macOS's
       Gatekeeper "unidentified developer" prompt

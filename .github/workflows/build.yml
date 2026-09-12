@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-macos:
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -31,8 +31,7 @@ jobs:
         run: echo "HAS_DEVELOPER_ID=$HAS_CERT" >> "$GITHUB_ENV"
 
       # Tag pushes (v0.1.1, v0.1.1-rc1, v0.1.1-pre0, ...): stamp Info.plist to
-      # the tag's exact version, and mark the Release as a prerelease whenever
-      # the tag has a prerelease suffix (anything after a hyphen).
+      # the tag's exact version.
       - name: Set version from tag
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
@@ -40,11 +39,6 @@ jobs:
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $TAG_VERSION" Resources/Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Resources/Info.plist
-          if [[ "$TAG_VERSION" == *-* ]]; then
-            echo "RELEASE_TYPE=prerelease" >> "$GITHUB_ENV"
-          else
-            echo "RELEASE_TYPE=release" >> "$GITHUB_ENV"
-          fi
 
       # Everything else (push to main, or a manual run): stamp an auto-incrementing
       # dev version instead, e.g. 0.1.0-dev.42, so every build is uniquely numbered.
@@ -122,29 +116,112 @@ jobs:
         run: |
           rm -f "$RUNNER_TEMP/signing.keychain-db" "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/asc-key.p8"
 
-      # Tag pushes: create the GitHub Release with notes auto-generated from
-      # commits since the last tag (GitHub's built-in "What's Changed" + full
-      # changelog link — no changelog file to maintain), and attach the zip.
-      - name: Create release with auto-generated notes
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          PRERELEASE_FLAG=""
-          if [ "$RELEASE_TYPE" = "prerelease" ]; then
-            PRERELEASE_FLAG="--prerelease"
-          fi
-          gh release create "$GITHUB_REF_NAME" build/DACSync-macOS.zip \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes \
-            $PRERELEASE_FLAG
-
-      # Push to main / manual runs: upload the zip as a workflow artifact only
-      # — never published as a public release.
+      # Always uploaded as a workflow artifact — the release job (tag
+      # pushes only) downloads this rather than each platform trying to
+      # create/attach to the release independently, which would race.
       - name: Upload build artifact
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
           name: DACSync-macOS
           path: build/DACSync-macOS.zip
+
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows/DACSync.Windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Same versioning scheme as the macOS job: exact tag version for
+      # releases, an auto-incrementing dev version otherwise.
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Set dev version
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        run: echo "APP_VERSION=0.0.0-dev.${{ github.run_number }}" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: dotnet build -c Release -p:Version=${{ env.APP_VERSION }}
+
+      # Self-contained so it runs on a Windows machine with no .NET
+      # runtime installed — matches how the macOS build is a standalone
+      # .app with no external dependency either.
+      - name: Publish
+        run: dotnet publish -r win-x64 --self-contained -c Release -o publish -p:Version=${{ env.APP_VERSION }}
+
+      - name: Zip published output
+        shell: pwsh
+        run: Compress-Archive -Path publish/* -DestinationPath DACSync-windows.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DACSync-windows
+          path: windows/DACSync.Windows/DACSync-windows.zip
+
+  # Tag pushes only: both platform builds land here, get renamed to their
+  # final release filenames, and go on a single GitHub Release together —
+  # one job per platform trying to create/attach to the same release
+  # independently would race, since they run in parallel.
+  #
+  # NOTE: the Windows build has not been runtime-verified on an actual
+  # Windows machine (see windows/README.md) — it's attached here on the
+  # strength of "compiles and publishes cleanly," not "confirmed working."
+  release:
+    needs: [build-macos, build-windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download macOS build
+        uses: actions/download-artifact@v4
+        with:
+          name: DACSync-macOS
+          path: macos
+
+      - name: Download Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: DACSync-windows
+          path: windows
+
+      # Tag pushes (v0.1.1, v0.1.1-rc1, v0.1.1-pre0, ...): mark the Release
+      # as a prerelease whenever the tag has a prerelease suffix (anything
+      # after a hyphen).
+      - name: Determine release type
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            echo "PRERELEASE_FLAG=--prerelease" >> "$GITHUB_ENV"
+          else
+            echo "PRERELEASE_FLAG=" >> "$GITHUB_ENV"
+          fi
+
+      # Notes auto-generated from commits since the last tag (GitHub's
+      # built-in "What's Changed" + full changelog link — no changelog
+      # file to maintain).
+      - name: Create release with auto-generated notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # shellcheck disable=SC2086
+          # $PRERELEASE_FLAG must stay unquoted: empty needs to vanish as
+          # an argument entirely, not pass through as a literal empty
+          # string (which would break gh's argument parsing).
+          gh release create "$GITHUB_REF_NAME" \
+            macos/DACSync-macOS.zip \
+            windows/DACSync-windows.zip \
+            --repo "${{ github.repository }}" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            $PRERELEASE_FLAG

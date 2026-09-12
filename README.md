@@ -71,6 +71,11 @@ likely be blocked by Gatekeeper as "unidentified developer" on first
 launch; right-click the app in Finder and choose **Open** (rather than
 double-clicking) to get past that once.
 
+**On Windows:** this whole README is about the macOS app. There's also a
+much smaller device-picker utility for Windows in [`windows/`](windows/)
+— see [`windows/README.md`](windows/README.md) before using it, since
+it hasn't been verified on an actual Windows machine yet.
+
 A `96K`-style label appears in your menu bar (no Dock icon — it's a
 background utility). Click it to open the menu.
 
@@ -361,10 +366,14 @@ any of this to the repo.
       themselves (Spotify added it March 2026) — the "watch a source app
       and force a shared device's format" problem mostly doesn't exist on
       Windows. Built instead as a smaller device-picker + exclusive-mode-
-      conflict-awareness tray utility (C#/.NET) in `windows/` — compiles
-      cleanly but **not yet verified on an actual Windows machine** (this
-      was written entirely from a Mac); see `windows/README.md` for what
-      specifically still needs testing before it's trustworthy
+      conflict-awareness tray utility (C#/.NET) in `windows/`, with its
+      own `build-windows` job in the same CI workflow as macOS — tagged
+      releases now ship a `DACSync-windows.zip` alongside the macOS
+      build. Compiles and publishes cleanly but **not yet verified on an
+      actual Windows machine** (this was written entirely from a Mac);
+      see `windows/README.md` for what specifically still needs testing
+      before it's trustworthy — released ahead of that verification at
+      the user's request
 - [ ] Browser extension (Chrome/Firefox) for YouTube: bridges to the native
       app via Native Messaging; scope limited by the fact that YouTube
       transcodes audio (Opus/AAC, fixed rates) so there's no "source format"
