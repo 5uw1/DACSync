@@ -1,17 +1,125 @@
 # DACSync
 
-A menu-bar service that keeps your Mac's audio output device's sample rate
-(and eventually bit depth) matched to whatever is actually playing, so macOS
-never has to resample before handing audio to your DAC/amp.
+A macOS menu-bar utility that watches Apple Music and automatically matches
+your audio output device's sample rate (and, optionally, bit depth) to
+whatever's actually playing — so macOS never has to resample Lossless or
+Hi-Res Lossless tracks before handing them to your DAC/amp.
 
-Phase 1 targets Apple Music (which surfaces Lossless / Hi-Res Lossless
-tracks at varying rates). Windows and a browser extension for YouTube are
-planned for later phases — see [Roadmap](#roadmap).
+Windows and a browser extension for YouTube are planned for later phases —
+see [Roadmap](#roadmap).
+
+## Features
+
+- **Automatic sample-rate switching** — detects the format of the track
+  Apple Music is playing (e.g. 44.1kHz, 48kHz, 96kHz) and sets your output
+  device to match, in real time, with no input needed.
+- **Menu bar label shows the current format at a glance** — e.g. `44K`,
+  `96K`, or `96K/24` — instead of a static icon.
+- **Switch history** — a timestamped log of every real format change, so
+  you can see what happened while you weren't looking.
+- **Syncs on launch** — if a track is already playing when DACSync starts,
+  it catches up immediately instead of waiting for the next track change.
+- **Launch at Login** — runs automatically in the background.
+- **(Advanced, off by default) Bit-depth switching** — can also set your
+  DAC's physical bit depth (e.g. 16-bit vs 24-bit) to match the source,
+  for DACs that expose more than one. Requires "exclusive access," which
+  **can silence your audio** — see [Exclusive access](#exclusive-access--bit-depth-advanced-off-by-default)
+  before turning it on.
+
+## Quick start
+
+There's no pre-built download yet — build it from source (it's small and
+fast to build):
+
+```bash
+git clone https://github.com/5uw1/purerate.git
+cd purerate
+scripts/build-app.sh
+```
+
+Then move the built app somewhere stable and launch it:
+
+```bash
+mv build/DACSync.app /Applications/
+open /Applications/DACSync.app
+```
+
+A `96K`-style label appears in your menu bar (no Dock icon — it's a
+background utility). Click it to open the menu.
+
+If you want it to start automatically, click **Launch at login** in the
+menu after moving the app to `/Applications` (see
+[Requirements](#requirements) for why the location matters).
+
+## Using the menu
+
+Click the menu bar label to open:
+
+| Item | What it does |
+|---|---|
+| **Auto-switch sample rate** | The main on/off switch. When on, DACSync tracks Apple Music and matches your device's sample rate automatically. Turning it off restores your device to whatever it was set to before DACSync touched it. |
+| **Take exclusive access (hog mode)** | Advanced, off by default — enables bit-depth switching. Reverts automatically every time you relaunch the app. **Read [the warning below](#exclusive-access--bit-depth-advanced-off-by-default) before enabling.** |
+| **Launch at login** | Adds/removes DACSync as a Login Item. |
+| **Output device** | Picker for which audio device DACSync manages, if you have more than one. |
+| **Device: ...** | The device's current sample rate (and bit depth, if exclusive access is active). |
+| **Last detected: ...** | The format DACSync most recently saw Apple Music report. |
+| **Switch history** | Timestamped log of real changes — e.g. `19:33:10 — 44K` then `19:33:23 — 96K`. Only actual changes are logged, not every check. |
+| **Show raw log matches** | Debug view of the raw system log lines DACSync is parsing — useful if detection seems stuck (see [Troubleshooting](#troubleshooting)). |
+| **Refresh devices** | Re-scans available output devices, and re-resolves the target device if it dropped out (see [Device re-enumeration](#device-re-enumeration)). |
+
+### Exclusive access / bit depth (advanced, off by default)
+
+**DACSync doesn't play audio — Apple Music does.** Bit-depth switching
+requires "Hog Mode," which grants *DACSync's own process* exclusive access
+to the output device. That blocks Apple Music (a separate process) from
+opening or holding its own audio stream to the same device — so turning
+this on can **silence your audio entirely**. This isn't a bug to be fixed;
+it's inherent to how Hog Mode works, and only really makes sense for apps
+that are themselves the audio player (Audirvana, BitPerfect).
+
+Because of that:
+- It's **off every time you launch DACSync**, regardless of what it was
+  set to last — it never silently re-engages.
+- Turning it on shows a warning directly in the menu.
+- Sample-rate-only switching (the default, main feature) does not have
+  this problem and works reliably without it.
+
+Only enable this if you understand the tradeoff and want to experiment.
+
+## Requirements
+
+- macOS 13 or later.
+- Your account must be an **admin** user — DACSync reads the live system
+  log (`log stream`) to detect what Apple Music is playing, which requires
+  it.
+- To use **Launch at Login**, the app needs to be running from a stable
+  location (e.g. `/Applications`) — macOS's Login Item registration is
+  tied to the app's path.
+
+## Troubleshooting
+
+**DACSync isn't detecting format changes.** Open the menu and enable
+**Show raw log matches** while playing a Lossless/Hi-Res track — you
+should see matching lines appear. If nothing shows up, Apple may have
+changed the log format DACSync relies on (it's undocumented and can shift
+between macOS/Music versions) — see
+[Log line patterns](#log-line-patterns) below for how to recapture it.
+
+**The target device keeps "forgetting" itself / switching stops working
+after a while.** Some DACs re-enumerate under a new device ID when their
+format changes, or when Hog Mode is engaged/released. DACSync watches for
+this and re-resolves the device automatically by name, but if it ever gets
+stuck, click **Refresh devices**.
+
+**I turned on exclusive access and now there's no sound.** This is
+expected — see [Exclusive access](#exclusive-access--bit-depth-advanced-off-by-default)
+above. Just turn the toggle off, or quit and relaunch DACSync (it never
+restores that setting automatically).
 
 ## How it works
 
-There is no public API for "what format is Apple Music currently decoding."
-The approach here — the same one used by the prior art
+There is no public API for "what format is Apple Music currently
+decoding." The approach here — the same technique used by the prior art
 [LosslessSwitcher](https://github.com/vincentneo/LosslessSwitcher) (GPL-3.0;
 no code from that project is reused here, only the general technique) — is:
 
@@ -22,9 +130,9 @@ no code from that project is reused here, only the general technique) — is:
    set the target output device's nominal sample rate to match — picking an
    exact match if the DAC supports it, otherwise the closest rate in the
    same 44.1kHz/48kHz family (`CoreAudioController.swift`).
-3. **Hold the device** (optional): "hog mode" takes exclusive access to the
-   output device so the shared system mixer can't reopen it at a mismatched
-   rate mid-track.
+3. **Hold the device** (optional, see above): "hog mode" takes exclusive
+   access to the output device so the shared system mixer can't reopen it
+   at a mismatched rate mid-track.
 4. **Match bit depth** (optional, needs exclusive access): sets each output
    stream's *physical* format (`kAudioStreamPropertyPhysicalFormat`) — the
    actual hardware wire format, separate from the device-wide nominal
@@ -38,96 +146,49 @@ no code from that project is reused here, only the general technique) — is:
    every 20s afterward, closing that gap for sample rate (it doesn't expose
    bit depth, so that still comes from the log-based detection above).
 
-The menu bar shows the current format as text (e.g. `96K/24`,
-`AppState.menuBarTitle`) instead of a static icon.
+### Log line patterns
 
-### Exclusive access / bit depth — works, but silences audio by design
+`FormatLineParser`'s regexes were captured live from Music.app on macOS
+26.6 (see the commit history) while switching between an AAC track, a
+44.1kHz/16-bit Lossless track, and a 96kHz/24-bit Hi-Res Lossless one — not
+guessed. The three matched lines
+(`fpfs_ReportAudioPlaybackThroughFigLog`'s `[BitDepth]`/`[SampleRate]`
+tags, `ACAppleLosslessDecoder`'s "Input format" line, and the `ampplay`
+`mediaFormatinfo` line) only ever fire while Music is actually decoding
+ALAC — the AAC track produced none of them — so a match is inherently a
+lossless-playback signal.
 
-The CoreAudio mechanics are confirmed correct end-to-end against a real
-**FiiO K13 R2R** USB DAC: Hog Mode engages properly (read back with the
-app's own PID as owner), and bit-depth switching applies for real — a
-24-bit source rounds to the DAC's nearest available depth (16/32, no exact
-24-bit option on this unit) at the matching sample rate, verified by
-reading the stream's physical format straight back from CoreAudio.
+Apple doesn't document these strings, so a future macOS/Music update can
+change them. To recapture:
 
-But there's a fundamental problem with using it: **DACSync doesn't play
-audio — Apple Music does.** Hog Mode grants *DACSync's own process*
-exclusive access to the device, which blocks Music.app (a separate
-process) from opening or holding its own audio stream to it. Hog Mode is
-meant for an app that's also the one rendering audio (Audirvana, BitPerfect
-— apps that intercept and play the audio themselves); a helper app that
-only watches and adjusts device settings can't safely hold it without
-silencing the actual player. Confirmed live: enabling exclusive access
-killed audio output entirely.
+```bash
+log stream --style compact --level debug --predicate \
+  'process == "Music" AND (eventMessage CONTAINS "BitDepth" OR eventMessage CONTAINS "ACAppleLosslessDecoder" OR eventMessage CONTAINS "PBAudioFormat" OR eventMessage CONTAINS "mediaFormatinfo")'
+```
 
-Given that, **exclusive access is not persisted between launches** — every
-session starts with it off (`AppState.init`), and enabling it live shows a
-prominent warning in the menu. Sample-rate-only switching (no Hog Mode)
-doesn't have this problem and is the reliable core feature; bit-depth
-switching stays available as opt-in, at-your-own-risk, until DACSync (or
-something built on it) actually renders the audio itself rather than just
-watching it — a much larger undertaking, out of scope for now. `setHogMode`
-still reads the property back rather than trusting the write's status, and
-surfaces `ControllerError.hogModeNotSupported` / `exclusiveAccessActuallyHeld`
-in the UI for hardware that can't hold it at all (built-in Mac audio never
-supports Hog Mode) so bit depth switching won't keep retrying there.
+while switching tracks, and adjust the regexes in
+`Sources/DACSync/PlaybackFormatMonitor.swift` to match what you see.
 
-### Device re-enumeration (and why it especially bites Hog Mode)
+### Device re-enumeration
 
 Changing a stream's *physical* format can make CoreAudio re-enumerate the
 device under a **new AudioDeviceID**, unlike a plain nominal-rate change.
-On the DAC above, *engaging or releasing Hog Mode itself* was also observed
-doing this — almost certainly the USB interface briefly resetting for an
-internal relay/clock reconfiguration. Since quitting DACSync releases Hog
-Mode, relaunching right away can race that reset and catch the device
-mid-disappearance.
+On at least one real DAC, *engaging or releasing Hog Mode itself* was also
+observed doing this — almost certainly the USB interface briefly resetting
+for an internal relay/clock reconfiguration. Since quitting DACSync
+releases Hog Mode, relaunching right away can race that reset and catch
+the device mid-disappearance.
 
 Two things handle this:
 - `AppState` watches `kAudioHardwarePropertyDevices` and re-resolves
   `targetDeviceID` by name when the cached ID goes stale
   (`CoreAudioController.deviceExists`, `AppState.handleDeviceListChanged`).
-- The target device is now persisted **by name**, not just ID
+- The target device is persisted **by name**, not just ID
   (`targetDeviceName` in `UserDefaults`), with a short retry on launch if
   the name isn't found immediately. This matters because the system's own
   "default output device" pointer isn't reliable to fall back on either —
-  on a multi-device Mac, another audio device flickering in as default
-  (observed here) would otherwise hijack the target away from the DAC the
-  user actually chose.
-
-### Log line patterns — verified against real output
-
-`FormatLineParser`'s regexes were captured live from Music.app on macOS 26.6
-(see the commit history) while switching between an AAC track, a
-44.1kHz/16-bit Lossless track, and a 96kHz/24-bit Hi-Res Lossless one — not
-guessed. Confirmed end-to-end: the app switched a real output device from
-44.1kHz to 48kHz automatically the instant a matching track started.
-
-The three matched lines (`fpfs_ReportAudioPlaybackThroughFigLog`'s
-`[BitDepth]`/`[SampleRate]` tags, `ACAppleLosslessDecoder`'s "Input format"
-line, and the `ampplay` `mediaFormatinfo` line) only ever fire while Music is
-actually decoding ALAC — the AAC track produced none of them — so a match is
-inherently a lossless-playback signal.
-
-Apple doesn't document these strings, though, so a future macOS/Music
-update can change them. If `DACSync` stops detecting changes:
-
-1. Run the app, open the menu, enable **Show raw log matches**.
-2. Play a Lossless/Hi-Res track in Apple Music and watch for lines there.
-3. If nothing shows up, recapture manually:
-   ```bash
-   log stream --style compact --level debug --predicate \
-     'process == "Music" AND (eventMessage CONTAINS "BitDepth" OR eventMessage CONTAINS "ACAppleLosslessDecoder" OR eventMessage CONTAINS "PBAudioFormat" OR eventMessage CONTAINS "mediaFormatinfo")'
-   ```
-   while switching tracks, and adjust the regexes in
-   `Sources/DACSync/PlaybackFormatMonitor.swift` to match what you see.
-
-### Requirements
-
-- macOS 13+
-- The logged-in user must be an **admin** account — reading the unified log
-  live (`log stream`) requires it, same as LosslessSwitcher.
-- Not sandboxed (needs to shell out to `log` and call CoreAudio HAL device
-  APIs directly).
+  on a multi-device Mac, another audio device flickering in as default has
+  been observed hijacking the target away from the DAC actually chosen.
 
 ## Building & running
 
@@ -137,10 +198,6 @@ For development (rebuild-and-relaunch loop):
 swift build
 swift run
 ```
-
-The app lives in the menu bar as a text label (e.g. `96K/24`) — no Dock
-icon, no windows. Open the menu to pick the target output device, toggle
-auto-switch and exclusive access, and watch the detected format.
 
 Note: `swift run` does **not** support the Launch at Login toggle —
 `SMAppService.mainApp` (`LaunchAtLogin.swift`) only works when DACSync is
@@ -198,11 +255,14 @@ macOS caches app icons aggressively — after installing a rebuilt `.app`,
       Launch at Login toggle (`SMAppService.mainApp`)
 - [x] macOS: bit-depth-aware exclusive-mode stream format selection
       (`CoreAudioController.matchBitDepth`) — mechanically verified against
-      a real external DAC (FiiO K13 R2R), but silences audio when enabled
-      (see above) — opt-in, not persisted between launches, not the
-      recommended way to use the app
+      a real external DAC, but silences audio when enabled (see above) —
+      opt-in, not persisted between launches, not the recommended way to
+      use the app
 - [x] macOS: custom app icon (`Resources/AppIcon.icns`, generated by
       `scripts/generate_icon.swift`)
+- [x] macOS: restore original format when auto-switch/exclusive access is
+      turned off, instead of leaving the device stuck
+- [x] macOS: visible switch history log in the menu
 - [ ] macOS: Developer ID signing & notarization
 - [ ] Windows: WASAPI exclusive-mode equivalent (C++ or C#), format
       detection strategy TBD per source app (no Apple Music on Windows —
