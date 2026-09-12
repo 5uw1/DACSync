@@ -277,6 +277,54 @@ rm -rf Resources/AppIcon.iconset
 macOS caches app icons aggressively — after installing a rebuilt `.app`,
 `killall Finder` (or log out/in) if the old icon still shows.
 
+### Signing & notarization
+
+`scripts/build-app.sh` looks for a **Developer ID Application** identity
+in the keychain (`security find-identity -v -p codesigning`) and signs
+with it — with the hardened runtime enabled, required for notarization —
+falling back to ad-hoc signing when none is installed (fine for local
+dev, not for distributing to other people).
+
+To get a Developer ID Application certificate: Xcode → Settings →
+Accounts → select your Apple ID (needs an active $99/year Developer
+Program membership) → **Manage Certificates…** → **+** → **Developer ID
+Application**. This puts the certificate and its private key straight
+into your login keychain — no manual CSR needed.
+
+Once a build is Developer ID signed, notarize it:
+
+```bash
+ASC_KEY_ID=<key ID> \
+ASC_ISSUER_ID=<issuer ID> \
+ASC_API_KEY_P8=/path/to/AuthKey_<ID>.p8 \
+scripts/notarize.sh
+```
+
+The three `ASC_*` values come from an [App Store Connect API
+key](https://appstoreconnect.apple.com/access/integrations/api) (the
+**Developer** role is enough) — create one, download the `.p8` file once
+(Apple won't let you re-download it, so keep a backup somewhere safe like
+a password manager), and note its Key ID and Issuer ID. The script
+refuses to run against an ad-hoc-signed build rather than wasting a
+submission on one the notary service would reject anyway.
+
+**CI** does both automatically for tagged releases, gated on whether the
+signing secrets are configured (dev builds from pushes to `main` always
+stay ad-hoc — no need to notarize every commit):
+
+- `DEVELOPER_ID_CERT_P12` — base64 of a `.p12` export of the Developer ID
+  Application certificate *and* its private key
+  (`security export -k login.keychain -t identities -f pkcs12 -o cert.p12`,
+  then `base64 -i cert.p12 | pbcopy`)
+- `DEVELOPER_ID_CERT_PASSWORD` — the password you set on that `.p12`
+- `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_API_KEY_P8` — same three values as
+  above (`ASC_API_KEY_P8` is the raw contents of the `.p8` file, not a
+  path — CI has no access to your filesystem)
+
+Set them with `gh secret set <NAME> --repo <owner>/<repo>` (`--body` for a
+plain value, or `< path/to/file` to pipe file contents in) — never commit
+any of this to the repo.
+
 ## Roadmap
 
 - [x] macOS: detect Apple Music format via log scraping, auto-switch output
@@ -297,8 +345,14 @@ macOS caches app icons aggressively — after installing a rebuilt `.app`,
       (`v*`) publish a Release with a downloadable `DACSync-macOS.zip`;
       pushes to `main` upload the same zip as a workflow artifact for
       testing a build without cutting a release
-- [ ] macOS: Developer ID signing & notarization (would remove the
-      Gatekeeper "unidentified developer" prompt on first launch)
+- [~] macOS: Developer ID signing & notarization — `scripts/build-app.sh`
+      auto-detects a Developer ID Application identity and signs with it
+      (falling back to ad-hoc when none is installed), and
+      `scripts/notarize.sh` submits to Apple's notary service and staples
+      the ticket; CI (`.github/workflows/build.yml`) does both for tagged
+      releases once the signing secrets are configured (see
+      [Signing & notarization](#signing--notarization)). Not yet live: the
+      Developer ID certificate itself hasn't been generated/installed.
 - [ ] Windows: WASAPI exclusive-mode equivalent (C++ or C#), format
       detection strategy TBD per source app (no Apple Music on Windows —
       likely Tidal/Qobuz-specific approaches)

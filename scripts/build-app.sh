@@ -28,13 +28,28 @@ cp "Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp "Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 printf 'APPL????' > "$APP_BUNDLE/Contents/PkgInfo"
 
-echo "==> Ad-hoc code signing"
-# Ad-hoc (-s -) is enough to run locally without a "damaged app" Gatekeeper
-# error. If you have a Developer ID, sign with that instead — SMAppService
-# Login Items (see LaunchAtLogin.swift) are more stable across rebuilds
-# under a consistent signing identity than under a fresh ad-hoc signature
-# each time.
-codesign --force --deep --sign - "$APP_BUNDLE"
+# Prefer a real Developer ID Application identity when one is installed
+# (checked into the keychain via Xcode > Settings > Accounts > Manage
+# Certificates, or imported from CI secrets — see scripts/notarize.sh and
+# .github/workflows/build.yml). Falls back to ad-hoc for local dev when
+# there's no Developer ID: SMAppService Login Items (LaunchAtLogin.swift)
+# are more stable across rebuilds under a consistent signing identity than
+# under a fresh ad-hoc signature each time, but ad-hoc still runs fine
+# locally without one.
+# The `|| true` matters: grep exits 1 when there's no match (the expected
+# case without a Developer ID cert installed), and under `set -eo
+# pipefail` that would otherwise abort the whole script right here.
+DEVELOPER_ID=$(security find-identity -v -p codesigning 2>/dev/null | grep -o '"Developer ID Application:.*"' | head -1 | tr -d '"' || true)
 
-echo "==> Done: $APP_BUNDLE"
+if [ -n "$DEVELOPER_ID" ]; then
+  echo "==> Signing with Developer ID: $DEVELOPER_ID"
+  # --options runtime (the hardened runtime) is required for notarization;
+  # harmless otherwise.
+  codesign --force --deep --options runtime --sign "$DEVELOPER_ID" "$APP_BUNDLE"
+  echo "==> Done: $APP_BUNDLE (Developer ID signed — run scripts/notarize.sh to notarize before distributing)"
+else
+  echo "==> No Developer ID Application identity found — ad-hoc signing"
+  codesign --force --deep --sign - "$APP_BUNDLE"
+  echo "==> Done: $APP_BUNDLE (ad-hoc signed — fine for local use, not for distribution)"
+fi
 echo "    open \"$APP_BUNDLE\""

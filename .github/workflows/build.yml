@@ -21,6 +21,15 @@ jobs:
       - name: Show Swift version
         run: swift --version
 
+      # A step's `if:` can't reference `secrets` directly (only env/github/
+      # etc. are allowed there) — stash whether the cert secret is set into
+      # $GITHUB_ENV here, in a step whose *env:* block can see secrets, so
+      # later steps can gate on `env.HAS_DEVELOPER_ID` instead.
+      - name: Check for Developer ID secret
+        env:
+          HAS_CERT: ${{ secrets.DEVELOPER_ID_CERT_P12 != '' }}
+        run: echo "HAS_DEVELOPER_ID=$HAS_CERT" >> "$GITHUB_ENV"
+
       # Tag pushes (v0.1.1, v0.1.1-rc1, v0.1.1-pre0, ...): stamp Info.plist to
       # the tag's exact version, and mark the Release as a prerelease whenever
       # the tag has a prerelease suffix (anything after a hyphen).
@@ -47,15 +56,64 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${CURRENT_VERSION}-dev.${{ github.run_number }}" Resources/Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Resources/Info.plist
 
+      # Release builds only, and only once DEVELOPER_ID_CERT_P12 is set as a
+      # repo secret (base64 of a .p12 export containing the Developer ID
+      # Application cert + private key). Until then this step is skipped
+      # and build-app.sh falls back to ad-hoc signing, same as local dev.
+      - name: Import Developer ID certificate
+        if: startsWith(github.ref, 'refs/tags/') && env.HAS_DEVELOPER_ID == 'true'
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+
+          echo "${{ secrets.DEVELOPER_ID_CERT_P12 }}" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" \
+            -P "${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Prepend the new keychain to the search list rather than
+          # replacing it, so codesign can still find the runner's other
+          # (unrelated) default keychains if it needs to. mapfile avoids
+          # the word-splitting issue of a bare unquoted $(...) expansion.
+          mapfile -t EXISTING_KEYCHAINS < <(security list-keychains -d user | sed 's/^ *"//;s/" *$//')
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "${EXISTING_KEYCHAINS[@]}"
+
+          rm -f "$RUNNER_TEMP/cert.p12"
+
       - name: Build .app
         run: scripts/build-app.sh
 
+      # Same secret gate as the import step above — skips cleanly until
+      # notarization credentials are actually configured, leaving an
+      # ad-hoc-signed (unnotarized) build as the release asset in the
+      # meantime.
+      - name: Notarize
+        if: startsWith(github.ref, 'refs/tags/') && env.HAS_DEVELOPER_ID == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          echo "${{ secrets.ASC_API_KEY_P8 }}" > "$RUNNER_TEMP/asc-key.p8"
+          ASC_API_KEY_P8="$RUNNER_TEMP/asc-key.p8" scripts/notarize.sh
+          rm -f "$RUNNER_TEMP/asc-key.p8"
+
       # ditto (not plain zip) preserves the bundle's resource forks/xattrs
       # correctly — the standard way to zip a macOS .app for distribution.
+      # Runs after notarization so the zipped app carries the stapled
+      # ticket when notarization ran.
       - name: Zip app bundle
         run: |
           cd build
           ditto -c -k --sequesterRsrc --keepParent DACSync.app DACSync-macOS.zip
+
+      - name: Clean up signing keychain
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/signing.keychain-db" "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/asc-key.p8"
 
       # Tag pushes: create the GitHub Release with notes auto-generated from
       # commits since the last tag (GitHub's built-in "What's Changed" + full
