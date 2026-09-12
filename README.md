@@ -356,9 +356,15 @@ any of this to the repo.
       (see [Signing & notarization](#signing--notarization)). Verified
       live end-to-end (`spctl --assess` accepts the result even with a
       simulated quarantine flag) starting with v0.1.4.
-- [ ] Windows: WASAPI exclusive-mode equivalent (C++ or C#), format
-      detection strategy TBD per source app (no Apple Music on Windows —
-      likely Tidal/Qobuz-specific approaches)
+- [~] Windows: scoped down from a direct macOS port after research showed
+      Tidal/Qobuz/Spotify all now do native WASAPI Exclusive Mode
+      themselves (Spotify added it March 2026) — the "watch a source app
+      and force a shared device's format" problem mostly doesn't exist on
+      Windows. Built instead as a smaller device-picker + exclusive-mode-
+      conflict-awareness tray utility (C#/.NET) in `windows/` — compiles
+      cleanly but **not yet verified on an actual Windows machine** (this
+      was written entirely from a Mac); see `windows/README.md` for what
+      specifically still needs testing before it's trustworthy
 - [ ] Browser extension (Chrome/Firefox) for YouTube: bridges to the native
       app via Native Messaging; scope limited by the fact that YouTube
       transcodes audio (Opus/AAC, fixed rates) so there's no "source format"

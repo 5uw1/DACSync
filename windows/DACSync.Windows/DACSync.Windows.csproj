@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- Lets `dotnet build` resolve Windows reference assemblies from a
+         non-Windows host (e.g. for compile-checking on macOS) — harmless
+         on real Windows, just unnecessary there. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- TODO: no .ico yet — macOS has no built-in PNG->ICO packer, and this
+         hasn't been generated on a Windows machine yet either. Add
+         <ApplicationIcon>Resources\AppIcon.ico</ApplicationIcon> once one exists. -->
+    <AssemblyName>DACSync</AssemblyName>
+    <RootNamespace>DACSync.Windows</RootNamespace>
+    <!-- Menu-bar-style utility: no console window, no visible main form. -->
+    <StartupObject>DACSync.Windows.Program</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <PackageReference Include="NAudio.Core" Version="2.2.1" />
+  </ItemGroup>
+
+</Project>
