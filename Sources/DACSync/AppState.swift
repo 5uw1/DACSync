@@ -34,6 +34,50 @@ final class AppState: ObservableObject {
             if let id = targetDeviceID, let name = outputDevices.first(where: { $0.id == id })?.name {
                 UserDefaults.standard.set(name, forKey: Keys.targetDeviceName)
             }
+
+            guard targetDeviceID != oldValue else { return }
+
+            // Without this, picking a device here had *no audible effect*:
+            // DACSync would dutifully match its format, but macOS kept
+            // routing actual playback to whatever was already the system
+            // default — completely unrelated to what's selected in this
+            // menu. This is what actually makes the picked device play.
+            if let id = targetDeviceID {
+                do {
+                    try audio.setDefaultOutputDevice(id)
+                } catch {
+                    statusMessage = "Couldn't set system output device: \(error.localizedDescription)"
+                }
+            }
+
+            // Hog mode held on the device we're leaving is meaningless (and
+            // blocking) on that device now that we're not managing it.
+            if exclusiveAccessActuallyHeld, let oldID = oldValue {
+                try? audio.setHogMode(of: oldID, owned: false)
+                exclusiveAccessActuallyHeld = false
+            }
+            // lastAppliedKey dedupes by (rate, bitDepth) alone — without
+            // resetting it, picking a new device that happens to already be
+            // sitting at the same rate/depth we last applied to the *old*
+            // device would silently skip ever touching the new one. Same
+            // for originalFormatDeviceID: whatever was captured belongs to
+            // the device we just left.
+            lastAppliedKey = nil
+            originalFormatDeviceID = nil
+
+            // Apply right away instead of waiting for the next track change
+            // or periodic sync (up to 20s) — otherwise switching devices
+            // looks like it does nothing until something else happens to
+            // trigger a re-detection.
+            if exclusiveAccessEnabled {
+                applyHogMode()
+            }
+            if let format = lastDetectedFormat {
+                handle(format: format)
+            } else if let id = targetDeviceID {
+                currentSampleRate = try? audio.nominalSampleRate(of: id)
+                currentBitDepth = audio.currentBitDepth(of: id)
+            }
         }
     }
     @Published private(set) var currentSampleRate: Double?

@@ -83,7 +83,7 @@ Click the menu bar label to open:
 | **Auto-switch sample rate** | The main on/off switch. When on, DACSync tracks Apple Music and matches your device's sample rate automatically. Turning it off restores your device to whatever it was set to before DACSync touched it. |
 | **Take exclusive access (hog mode)** | Advanced, off by default — enables bit-depth switching. Reverts automatically every time you relaunch the app. **Read [the warning below](#exclusive-access--bit-depth-advanced-off-by-default) before enabling.** |
 | **Launch at login** | Adds/removes DACSync as a Login Item. |
-| **Output device** | Picker for which audio device DACSync manages, if you have more than one. |
+| **Output device** | Which audio device DACSync manages, if you have more than one. Picking a device here also makes it your Mac's actual system output (same as picking it in the menu bar sound icon / System Settings → Sound) — otherwise the device DACSync is matching format for and the device your Mac is actually playing through could silently be two different things. |
 | **Device: ...** | The device's current sample rate (and bit depth, if exclusive access is active). |
 | **Last detected: ...** | The format DACSync most recently saw Apple Music report. |
 | **Switch history** | Timestamped log of real changes — e.g. `19:33:10 — 44K` then `19:33:23 — 96K`. Only actual changes are logged, not every check. |
@@ -133,6 +133,13 @@ after a while.** Some DACs re-enumerate under a new device ID when their
 format changes, or when Hog Mode is engaged/released. DACSync watches for
 this and re-resolves the device automatically by name, but if it ever gets
 stuck, click **Refresh devices**.
+
+**I picked a different device in the menu and nothing happens.** Fixed —
+picking a device now also makes it your Mac's actual system output, not
+just the device DACSync tracks internally. If you're on an older build,
+update: previously the picker only changed what DACSync matched format
+for, leaving your Mac's real audio output (and therefore what you could
+actually hear) completely unaffected.
 
 **I turned on exclusive access and now there's no sound.** This is
 expected — see [Exclusive access](#exclusive-access--bit-depth-advanced-off-by-default)

@@ -84,6 +84,33 @@ final class CoreAudioController {
         return AudioOutputDevice(id: deviceID, name: try name(of: deviceID))
     }
 
+    /// Makes `id` the system's actual default output device — what
+    /// Apple Music (and everything else) actually plays through, as
+    /// opposed to just the device DACSync happens to be managing.
+    ///
+    /// Without this, picking a device in DACSync's own menu had *no
+    /// audible effect whatsoever*: DACSync would dutifully match sample
+    /// rate/bit depth on the picked device, but since the system was still
+    /// routing audio to whatever device was *actually* default, none of it
+    /// was audible. Confirmed live: selecting a different device in the
+    /// menu left `kAudioHardwarePropertyDefaultOutputDevice` completely
+    /// unchanged.
+    func setDefaultOutputDevice(_ id: AudioDeviceID) throws {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID = id
+        let size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, size, &deviceID
+        )
+        guard status == noErr else {
+            throw ControllerError.propertyWriteFailed("kAudioHardwarePropertyDefaultOutputDevice", status)
+        }
+    }
+
     func outputDevices() throws -> [AudioOutputDevice] {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
