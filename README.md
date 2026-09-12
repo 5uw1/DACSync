@@ -62,10 +62,14 @@ Then launch it:
 open /Applications/DACSync.app
 ```
 
-The build isn't notarized (see [Roadmap](#roadmap)), so the first launch
-will likely be blocked by Gatekeeper as "unidentified developer." Right-click
-the app in Finder and choose **Open** (rather than double-clicking) to get
-past that — you only need to do this once.
+Releases from v0.1.4 onward are Developer ID signed and notarized, so
+they launch cleanly with no Gatekeeper warning. A build you produce
+yourself with `scripts/build-app.sh` is ad-hoc signed unless you've
+installed a Developer ID certificate (see
+[Signing & notarization](#signing--notarization)) — ad-hoc builds will
+likely be blocked by Gatekeeper as "unidentified developer" on first
+launch; right-click the app in Finder and choose **Open** (rather than
+double-clicking) to get past that once.
 
 A `96K`-style label appears in your menu bar (no Dock icon — it's a
 background utility). Click it to open the menu.
@@ -345,14 +349,13 @@ any of this to the repo.
       (`v*`) publish a Release with a downloadable `DACSync-macOS.zip`;
       pushes to `main` upload the same zip as a workflow artifact for
       testing a build without cutting a release
-- [~] macOS: Developer ID signing & notarization — `scripts/build-app.sh`
-      auto-detects a Developer ID Application identity and signs with it
-      (falling back to ad-hoc when none is installed), and
-      `scripts/notarize.sh` submits to Apple's notary service and staples
-      the ticket; CI (`.github/workflows/build.yml`) does both for tagged
-      releases once the signing secrets are configured (see
-      [Signing & notarization](#signing--notarization)). Not yet live: the
-      Developer ID certificate itself hasn't been generated/installed.
+- [x] macOS: Developer ID signing & notarization — `scripts/build-app.sh`
+      auto-detects a Developer ID Application identity and signs with it,
+      and `scripts/notarize.sh` submits to Apple's notary service and
+      staples the ticket; CI does both automatically for tagged releases
+      (see [Signing & notarization](#signing--notarization)). Verified
+      live end-to-end (`spctl --assess` accepts the result even with a
+      simulated quarantine flag) starting with v0.1.4.
 - [ ] Windows: WASAPI exclusive-mode equivalent (C++ or C#), format
       detection strategy TBD per source app (no Apple Music on Windows —
       likely Tidal/Qobuz-specific approaches)
