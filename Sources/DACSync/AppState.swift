@@ -5,7 +5,12 @@ import Foundation
 @MainActor
 final class AppState: ObservableObject {
     @Published var autoSwitchEnabled: Bool = true {
-        didSet { UserDefaults.standard.set(autoSwitchEnabled, forKey: Keys.autoSwitch) }
+        didSet {
+            UserDefaults.standard.set(autoSwitchEnabled, forKey: Keys.autoSwitch)
+            if !autoSwitchEnabled {
+                restoreOriginalFormat(includeSampleRate: true)
+            }
+        }
     }
     @Published var exclusiveAccessEnabled: Bool = false {
         didSet {
@@ -69,6 +74,46 @@ final class AppState: ObservableObject {
     private struct FormatKey: Equatable {
         let sampleRate: Double
         let bitDepth: Int?
+    }
+
+    /// The device's own format, captured before DACSync first touches it,
+    /// so turning auto-switch/exclusive access back off can put it back
+    /// rather than leaving it stuck at whatever was last forced. Keyed to
+    /// the specific device ID: if the hardware re-enumerates (see
+    /// CoreAudioController.deviceExists), there's no way to know the truly
+    /// original state of the *new* ID, so it re-captures fresh — the best
+    /// available fallback.
+    private var originalFormatDeviceID: AudioDeviceID?
+    private var originalSampleRate: Double?
+    private var originalBitDepth: Int?
+
+    private func captureOriginalFormatIfNeeded(for deviceID: AudioDeviceID) {
+        guard originalFormatDeviceID != deviceID else { return }
+        originalFormatDeviceID = deviceID
+        originalSampleRate = try? audio.nominalSampleRate(of: deviceID)
+        originalBitDepth = audio.currentBitDepth(of: deviceID)
+    }
+
+    /// Puts the target device back to its captured original format.
+    /// `includeSampleRate: false` restores bit depth only — used when just
+    /// exclusive access is released but auto-switch is still managing the
+    /// sample rate.
+    private func restoreOriginalFormat(includeSampleRate: Bool) {
+        guard let deviceID = targetDeviceID else { return }
+        lastAppliedKey = nil
+
+        var rateForBitDepthMatch = currentSampleRate
+        if includeSampleRate, let originalSampleRate {
+            rateForBitDepthMatch = try? audio.matchSampleRate(of: deviceID, toSourceRate: originalSampleRate)
+            currentSampleRate = rateForBitDepthMatch
+        }
+
+        if let originalBitDepth, let rate = rateForBitDepthMatch {
+            currentBitDepth = try? audio.matchBitDepth(of: deviceID, sampleRate: rate, bitDepth: originalBitDepth)
+        } else {
+            currentBitDepth = audio.currentBitDepth(of: deviceID)
+        }
+        statusMessage = "Restored original format"
     }
 
     private enum Keys {
@@ -214,36 +259,43 @@ final class AppState: ObservableObject {
             // nothing real.
             if let id = targetDeviceID, !audio.deviceExists(id) {
                 targetDeviceID = nil
+            }
+
+            if targetDeviceID == nil {
                 // Prefer matching the persisted device *name* over the
                 // system's own default-output pointer: on this kind of
                 // multi-device setup that pointer isn't trustworthy either
                 // (a nearby iPhone's Continuity microphone was observed
-                // intermittently becoming the system default output),
-                // and would otherwise hijack the target away from the
-                // device the user actually picked.
+                // intermittently becoming the system default output), and
+                // would otherwise hijack the target away from the device
+                // the user actually picked. Runs whether we just lost a
+                // live target above or simply never had a resolved ID yet
+                // (e.g. only a name was persisted).
                 if !resolveByPersistedName() {
-                    // Releasing hog mode on quit is itself what makes some
-                    // DACs briefly reset their USB interface — relaunching
-                    // right after a quit can race that reset, catching the
-                    // device mid-disappearance. Retry shortly before
-                    // falling back to (the not fully trustworthy) system
-                    // default.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                        guard let self else { return }
-                        if !self.resolveByPersistedName(), self.targetDeviceID == nil {
-                            self.targetDeviceID = try? self.audio.defaultOutputDevice().id
+                    if UserDefaults.standard.string(forKey: Keys.targetDeviceName) != nil {
+                        // Have a name to retry toward — releasing hog mode
+                        // on quit is itself what makes some DACs briefly
+                        // reset their USB interface, so relaunching right
+                        // after a quit can race that reset and catch the
+                        // device mid-disappearance. Retry shortly before
+                        // falling back to (the not fully trustworthy)
+                        // system default.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                            guard let self else { return }
+                            if !self.resolveByPersistedName(), self.targetDeviceID == nil {
+                                self.targetDeviceID = try? self.audio.defaultOutputDevice().id
+                            }
+                            if self.exclusiveAccessEnabled {
+                                self.applyHogMode()
+                            }
                         }
-                        if self.exclusiveAccessEnabled {
-                            self.applyHogMode()
-                        }
+                    } else {
+                        // No prior device preference at all (first launch)
+                        // — fine to trust system default here since
+                        // there's no better signal to retry toward.
+                        targetDeviceID = try? audio.defaultOutputDevice().id
                     }
                 }
-            }
-            if targetDeviceID == nil, UserDefaults.standard.string(forKey: Keys.targetDeviceName) == nil {
-                // No prior device preference at all (first launch) — fine
-                // to trust system default here since there's no better
-                // signal to retry toward.
-                targetDeviceID = try? audio.defaultOutputDevice().id
             }
             if let id = targetDeviceID {
                 currentSampleRate = try? audio.nominalSampleRate(of: id)
@@ -302,6 +354,7 @@ final class AppState: ObservableObject {
     private func handle(format: DetectedFormat) {
         lastDetectedFormat = format
         guard autoSwitchEnabled, let deviceID = targetDeviceID else { return }
+        captureOriginalFormatIfNeeded(for: deviceID)
 
         let key = FormatKey(sampleRate: format.sampleRate, bitDepth: format.bitDepth)
         if key == lastAppliedKey, let lastAppliedAt, Date().timeIntervalSince(lastAppliedAt) < 1.0 {
@@ -335,15 +388,19 @@ final class AppState: ObservableObject {
 
     private func applyHogMode() {
         guard let deviceID = targetDeviceID else { return }
+        captureOriginalFormatIfNeeded(for: deviceID)
         do {
             try audio.setHogMode(of: deviceID, owned: exclusiveAccessEnabled)
             exclusiveAccessActuallyHeld = exclusiveAccessEnabled
             // Re-apply bit depth now that exclusivity just changed — either
-            // we can finally set it reliably, or we just lost the device
-            // and shouldn't keep pretending our last setting sticks.
+            // we can finally set it reliably, or we just released it and
+            // should put the device's bit depth back rather than leaving
+            // it stuck at whatever was last forced.
             if exclusiveAccessActuallyHeld, let format = lastDetectedFormat, let bitDepth = format.bitDepth,
                let rate = currentSampleRate {
                 currentBitDepth = try audio.matchBitDepth(of: deviceID, sampleRate: rate, bitDepth: bitDepth)
+            } else if !exclusiveAccessEnabled {
+                restoreOriginalFormat(includeSampleRate: false)
             } else {
                 currentBitDepth = audio.currentBitDepth(of: deviceID)
             }
