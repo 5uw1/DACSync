@@ -27,6 +27,17 @@ final class AppState: ObservableObject {
     @Published private(set) var exclusiveAccessActuallyHeld: Bool = false
     @Published private(set) var lastDetectedFormat: DetectedFormat?
     @Published private(set) var statusMessage: String = "Starting…"
+
+    /// Compact menu bar label — "44K", "96K", or "96K/24" once bit depth is
+    /// actually being switched (exclusive access held).
+    var menuBarTitle: String {
+        guard let rate = currentSampleRate else { return "PureRate" }
+        let khz = Int((rate / 1000).rounded())
+        if exclusiveAccessActuallyHeld, let bitDepth = currentBitDepth {
+            return "\(khz)K/\(bitDepth)"
+        }
+        return "\(khz)K"
+    }
     @Published private(set) var recentLogLines: [String] = []
 
     private let audio = CoreAudioController()

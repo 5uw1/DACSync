@@ -48,8 +48,11 @@ struct PureRateApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("PureRate", systemImage: "waveform") {
+        MenuBarExtra {
             MenuBarView(state: state)
+        } label: {
+            Text(state.menuBarTitle)
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
         }
         .menuBarExtraStyle(.window)
     }
