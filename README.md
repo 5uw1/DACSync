@@ -13,6 +13,16 @@ Hi-Res Lossless tracks before handing them to your DAC/amp.
 Windows and a browser extension for YouTube are planned for later phases —
 see [Roadmap](#roadmap).
 
+## Screenshots
+
+The menu bar label updates live to show the current format:
+
+<img src="docs/screenshot-menubar.png" alt="Menu bar label showing 48K">
+
+Click it to open the menu:
+
+<img src="docs/screenshot-menu.png" alt="DACSync menu, open" width="320">
+
 ## Features
 
 - **Automatic sample-rate switching** — detects the format of the track
