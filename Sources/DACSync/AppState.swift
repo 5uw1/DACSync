@@ -59,6 +59,34 @@ final class AppState: ObservableObject {
     }
     @Published private(set) var recentLogLines: [String] = []
 
+    struct SwitchLogEntry: Identifiable {
+        let id = UUID()
+        let timestamp: Date
+        let sampleRate: Double
+        let bitDepth: Int?
+
+        var displayText: String {
+            let time = timestamp.formatted(date: .omitted, time: .standard)
+            let khz = Int((sampleRate / 1000).rounded())
+            let bitText = bitDepth.map { "\($0)-bit/" } ?? ""
+            return "\(time) — \(bitText)\(khz)K"
+        }
+    }
+    /// Only actual changes, newest first — not every detection event (a
+    /// re-detected identical format, or a no-op restore, doesn't get an
+    /// entry).
+    @Published private(set) var switchHistory: [SwitchLogEntry] = []
+
+    private func logSwitchIfChanged(sampleRate: Double, bitDepth: Int?) {
+        if let last = switchHistory.first, abs(last.sampleRate - sampleRate) < 1, last.bitDepth == bitDepth {
+            return
+        }
+        switchHistory.insert(SwitchLogEntry(timestamp: Date(), sampleRate: sampleRate, bitDepth: bitDepth), at: 0)
+        if switchHistory.count > 50 {
+            switchHistory.removeLast(switchHistory.count - 50)
+        }
+    }
+
     private let audio = CoreAudioController()
     private let monitor = PlaybackFormatMonitor()
 
@@ -111,6 +139,9 @@ final class AppState: ObservableObject {
             currentBitDepth = try? audio.matchBitDepth(of: deviceID, sampleRate: rate, bitDepth: originalBitDepth)
         } else {
             currentBitDepth = audio.currentBitDepth(of: deviceID)
+        }
+        if let rate = currentSampleRate {
+            logSwitchIfChanged(sampleRate: rate, bitDepth: currentBitDepth)
         }
         statusMessage = "Restored original format"
     }
@@ -374,6 +405,8 @@ final class AppState: ObservableObject {
                 appliedBitDepth = try audio.matchBitDepth(of: deviceID, sampleRate: appliedRate, bitDepth: bitDepth)
                 currentBitDepth = appliedBitDepth
             }
+
+            logSwitchIfChanged(sampleRate: appliedRate, bitDepth: appliedBitDepth)
 
             let sourceBitText = format.bitDepth.map { "\($0)-bit/" } ?? ""
             let renditionText = format.rendition.map { " (\($0))" } ?? ""

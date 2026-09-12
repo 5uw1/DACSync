@@ -63,6 +63,26 @@ struct MenuBarView: View {
 
             Divider()
 
+            Text("Switch history").font(.caption).bold()
+            if state.switchHistory.isEmpty {
+                Text("No changes yet")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(state.switchHistory) { entry in
+                            Text(entry.displayText)
+                                .font(.system(size: 10, design: .monospaced))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(height: 110)
+            }
+
+            Divider()
+
             Button(state.outputDevices.isEmpty ? "Refresh devices" : "Refresh devices") {
                 state.refreshDevices()
             }
