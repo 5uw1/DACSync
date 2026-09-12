@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct PureRateApp: App {
+struct DACSyncApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var state: AppState
 
@@ -27,7 +27,7 @@ struct PureRateApp: App {
         // no other scriptable path (SMAppService only works from inside
         // the bundled app itself, and driving the actual menu bar UI needs
         // Accessibility permission this isn't granted). Run directly, e.g.
-        // `PureRate.app/Contents/MacOS/PureRate --test-login-item-register`.
+        // `DACSync.app/Contents/MacOS/DACSync --test-login-item-register`.
         let args = CommandLine.arguments
         if args.contains("--test-login-item-register") || args.contains("--test-login-item-unregister") {
             let enable = args.contains("--test-login-item-register")

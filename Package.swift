@@ -2,14 +2,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "PureRate",
+    name: "DACSync",
     platforms: [
         .macOS(.v13)
     ],
     targets: [
         .executableTarget(
-            name: "PureRate",
-            path: "Sources/PureRate"
+            name: "DACSync",
+            path: "Sources/DACSync"
         )
     ]
 )

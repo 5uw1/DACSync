@@ -1,18 +1,18 @@
 #!/bin/bash
-# Builds a release binary and wraps it into a proper PureRate.app bundle.
-# PureRate is a plain SwiftPM package (no Xcode project), so there's no
+# Builds a release binary and wraps it into a proper DACSync.app bundle.
+# DACSync is a plain SwiftPM package (no Xcode project), so there's no
 # .xcodeproj to Archive — this script does by hand what Xcode would do for
 # packaging: bundle structure, Info.plist, ad-hoc code signing.
 #
 # Usage: scripts/build-app.sh
-# Output: build/PureRate.app
+# Output: build/DACSync.app
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-APP_NAME="PureRate"
+APP_NAME="DACSync"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 

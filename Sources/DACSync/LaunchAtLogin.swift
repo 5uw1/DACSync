@@ -1,7 +1,7 @@
 import ServiceManagement
 
 /// Wraps `SMAppService.mainApp`, the macOS 13+ Login Item API. Requires
-/// PureRate to actually be running as a bundled `.app` (see
+/// DACSync to actually be running as a bundled `.app` (see
 /// `scripts/build-app.sh`) — `SMAppService` has no effect on a bare binary
 /// launched via `swift run`.
 enum LaunchAtLogin {

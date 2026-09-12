@@ -1,4 +1,4 @@
-# PureRate
+# DACSync
 
 A menu-bar service that keeps your Mac's audio output device's sample rate
 (and eventually bit depth) matched to whatever is actually playing, so macOS
@@ -31,7 +31,7 @@ no code from that project is reused here, only the general technique) — is:
    sample rate — to the source's bit depth where the DAC offers more than
    one (`CoreAudioController.matchBitDepth`).
 5. **Sync on launch / periodically**: `log stream` only sees *new* log
-   lines, so a track already playing before PureRate (re)launched is
+   lines, so a track already playing before DACSync (re)launched is
    otherwise invisible until the next track change. `MusicScriptBridge`
    asks Music directly via AppleScript (`sample rate of current track` —
    an officially exposed property, confirmed accurate) right at launch and
@@ -60,7 +60,7 @@ Changing a stream's *physical* format can make CoreAudio re-enumerate the
 device under a **new AudioDeviceID**, unlike a plain nominal-rate change.
 On the DAC above, *engaging or releasing Hog Mode itself* was also observed
 doing this — almost certainly the USB interface briefly resetting for an
-internal relay/clock reconfiguration. Since quitting PureRate releases Hog
+internal relay/clock reconfiguration. Since quitting DACSync releases Hog
 Mode, relaunching right away can race that reset and catch the device
 mid-disappearance.
 
@@ -91,7 +91,7 @@ actually decoding ALAC — the AAC track produced none of them — so a match is
 inherently a lossless-playback signal.
 
 Apple doesn't document these strings, though, so a future macOS/Music
-update can change them. If `PureRate` stops detecting changes:
+update can change them. If `DACSync` stops detecting changes:
 
 1. Run the app, open the menu, enable **Show raw log matches**.
 2. Play a Lossless/Hi-Res track in Apple Music and watch for lines there.
@@ -101,7 +101,7 @@ update can change them. If `PureRate` stops detecting changes:
      'process == "Music" AND (eventMessage CONTAINS "BitDepth" OR eventMessage CONTAINS "ACAppleLosslessDecoder" OR eventMessage CONTAINS "PBAudioFormat" OR eventMessage CONTAINS "mediaFormatinfo")'
    ```
    while switching tracks, and adjust the regexes in
-   `Sources/PureRate/PlaybackFormatMonitor.swift` to match what you see.
+   `Sources/DACSync/PlaybackFormatMonitor.swift` to match what you see.
 
 ### Requirements
 
@@ -120,12 +120,12 @@ swift build
 swift run
 ```
 
-The app lives in the menu bar (waveform icon) — no Dock icon, no windows.
-Open the menu to pick the target output device, toggle auto-switch and
-exclusive access, and watch the detected format.
+The app lives in the menu bar as a text label (e.g. `96K/24`) — no Dock
+icon, no windows. Open the menu to pick the target output device, toggle
+auto-switch and exclusive access, and watch the detected format.
 
 Note: `swift run` does **not** support the Launch at Login toggle —
-`SMAppService.mainApp` (`LaunchAtLogin.swift`) only works when PureRate is
+`SMAppService.mainApp` (`LaunchAtLogin.swift`) only works when DACSync is
 actually running as a bundled `.app`. Use the packaged build below to test
 that.
 
@@ -133,13 +133,13 @@ that.
 
 ```bash
 scripts/build-app.sh
-open build/PureRate.app
+open build/DACSync.app
 ```
 
-This builds a release binary and hand-assembles `build/PureRate.app`
+This builds a release binary and hand-assembles `build/DACSync.app`
 (`Contents/MacOS`, `Contents/Info.plist`, ad-hoc code signature) — there's
 no Xcode project here to Archive, since this is a plain SwiftPM package.
-To actually run at login, move `PureRate.app` somewhere stable (e.g.
+To actually run at login, move `DACSync.app` somewhere stable (e.g.
 `/Applications`) first, then toggle **Launch at login** from the menu; it
 shows up under System Settings → General → Login Items afterward.
 

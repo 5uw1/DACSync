@@ -5,11 +5,11 @@ import Foundation
 ///
 /// This exists because `PlaybackFormatMonitor`'s `log stream` tap only sees
 /// *new* log lines — it has no visibility into a track that was already
-/// playing before PureRate (re)launched, so the device could sit at a
+/// playing before DACSync (re)launched, so the device could sit at a
 /// stale rate from a previous session indefinitely until the next track
 /// change. `sample rate of current track` is an officially exposed
 /// AppleScript property (confirmed live: reports 96000 for a Hi-Res
-/// Lossless track) and works regardless of when PureRate started, closing
+/// Lossless track) and works regardless of when DACSync started, closing
 /// that gap. It does not expose bit depth, so this is a sample-rate-only
 /// safety net alongside the log-based detection, not a replacement.
 enum MusicScriptBridge {

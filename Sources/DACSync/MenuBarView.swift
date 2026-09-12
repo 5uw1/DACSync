@@ -6,7 +6,7 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("PureRate").font(.headline)
+            Text("DACSync").font(.headline)
 
             Toggle("Auto-switch sample rate", isOn: $state.autoSwitchEnabled)
             Toggle("Take exclusive access (hog mode)", isOn: $state.exclusiveAccessEnabled)
@@ -79,7 +79,7 @@ struct MenuBarView: View {
 
             Divider()
 
-            Button("Quit PureRate") {
+            Button("Quit DACSync") {
                 NSApplication.shared.terminate(nil)
             }
         }

@@ -46,7 +46,7 @@ final class AppState: ObservableObject {
     /// Compact menu bar label — "44K", "96K", or "96K/24" once bit depth is
     /// actually being switched (exclusive access held).
     var menuBarTitle: String {
-        guard let rate = currentSampleRate else { return "PureRate" }
+        guard let rate = currentSampleRate else { return "DACSync" }
         let khz = Int((rate / 1000).rounded())
         if exclusiveAccessActuallyHeld, let bitDepth = currentBitDepth {
             return "\(khz)K/\(bitDepth)"
