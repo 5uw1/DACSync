@@ -39,6 +39,11 @@ final class AppState: ObservableObject {
 
         refreshDevices()
         wireMonitor()
+        // Start immediately at launch — MenuBarExtra's content closure (and
+        // therefore MenuBarView's .onAppear) only evaluates once the user
+        // opens the menu, which would otherwise leave monitoring off by
+        // default for however long until that first click.
+        startMonitoring()
     }
 
     func refreshDevices() {

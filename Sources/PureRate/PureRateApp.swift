@@ -15,7 +15,6 @@ struct PureRateApp: App {
     var body: some Scene {
         MenuBarExtra("PureRate", systemImage: "waveform") {
             MenuBarView(state: state)
-                .onAppear { state.startMonitoring() }
         }
         .menuBarExtraStyle(.window)
     }

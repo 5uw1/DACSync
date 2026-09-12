@@ -122,8 +122,18 @@ final class PlaybackFormatMonitor {
 
     private(set) var isRunning = false
 
+    /// Guards against a fast crash-restart loop (e.g. a permissions error
+    /// that will never resolve itself) pegging a CPU core forever.
+    private var consecutiveFailures = 0
+    private var wasStoppedExplicitly = false
+    /// Bumped on every start() so a delayed "still healthy" reset from an
+    /// earlier run can't clobber the failure count of a later, actually
+    /// struggling run.
+    private var generation = 0
+
     func start() throws {
         guard !isRunning else { return }
+        wasStoppedExplicitly = false
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/log")
@@ -135,29 +145,66 @@ final class PlaybackFormatMonitor {
 
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty, let chunk = String(data: data, encoding: .utf8) else { return }
+            // Empty data means EOF (the process died or its pipe closed).
+            // The fd stays "readable" forever at EOF, so failing to detach
+            // here spins this closure in a tight loop pegging a CPU core.
+            guard !data.isEmpty else {
+                handle.readabilityHandler = nil
+                return
+            }
+            guard let chunk = String(data: data, encoding: .utf8) else { return }
             chunk.enumerateLines { line, _ in
                 self?.handle(line: line)
             }
         }
 
         process.terminationHandler = { [weak self] proc in
-            self?.isRunning = false
-            self?.onStopped?(proc.terminationStatus == 0 ? nil : LogStreamError.nonZeroExit(proc.terminationStatus))
+            DispatchQueue.main.async {
+                self?.handleTermination(status: proc.terminationStatus)
+            }
         }
 
         try process.run()
         self.process = process
         self.stdoutPipe = pipe
         isRunning = true
+
+        generation += 1
+        let startedGeneration = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+            guard let self, self.generation == startedGeneration, self.isRunning else { return }
+            self.consecutiveFailures = 0
+        }
     }
 
     func stop() {
+        wasStoppedExplicitly = true
         stdoutPipe?.fileHandleForReading.readabilityHandler = nil
         process?.terminate()
         process = nil
         stdoutPipe = nil
         isRunning = false
+    }
+
+    private func handleTermination(status: Int32) {
+        isRunning = false
+        process = nil
+        stdoutPipe = nil
+        onStopped?(status == 0 ? nil : LogStreamError.nonZeroExit(status))
+
+        guard !wasStoppedExplicitly else { return }
+
+        // A clean exit or a handful of quick failures in a row usually
+        // means something structural (no admin rights, `log` missing) —
+        // don't spin retrying forever in that case.
+        consecutiveFailures += 1
+        guard consecutiveFailures <= 5 else { return }
+
+        let delay = min(30.0, pow(2.0, Double(consecutiveFailures)))
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, !self.isRunning, !self.wasStoppedExplicitly else { return }
+            try? self.start()
+        }
     }
 
     private func handle(line: String) {
