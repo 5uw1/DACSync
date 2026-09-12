@@ -3,6 +3,7 @@ import SwiftUI
 struct MenuBarView: View {
     @ObservedObject var state: AppState
     @State private var showDebugLog = false
+    @State private var showSwitchHistory = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -63,22 +64,25 @@ struct MenuBarView: View {
 
             Divider()
 
-            Text("Switch history").font(.caption).bold()
-            if state.switchHistory.isEmpty {
-                Text("No changes yet")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(state.switchHistory) { entry in
-                            Text(entry.displayText)
-                                .font(.system(size: 10, design: .monospaced))
+            Toggle("Show switch history", isOn: $showSwitchHistory)
+
+            if showSwitchHistory {
+                if state.switchHistory.isEmpty {
+                    Text("No changes yet")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(state.switchHistory) { entry in
+                                Text(entry.displayText)
+                                    .font(.system(size: 10, design: .monospaced))
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 110)
                 }
-                .frame(height: 110)
             }
 
             Divider()
