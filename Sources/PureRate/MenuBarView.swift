@@ -31,7 +31,8 @@ struct MenuBarView: View {
 
             if let format = state.lastDetectedFormat {
                 let bitText = format.bitDepth.map { "\($0)-bit / " } ?? ""
-                Text("Last detected: \(bitText)\(Int(format.sampleRate)) Hz")
+                let renditionText = format.rendition.map { " (\($0))" } ?? ""
+                Text("Last detected: \(bitText)\(Int(format.sampleRate)) Hz\(renditionText)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

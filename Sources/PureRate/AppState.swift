@@ -68,6 +68,9 @@ final class AppState: ObservableObject {
         monitor.onFormatDetected = { [weak self] format in
             Task { @MainActor in self?.handle(format: format) }
         }
+        monitor.onRenditionChanged = { [weak self] rendition in
+            Task { @MainActor in self?.statusMessage = "Rendition: \(rendition)" }
+        }
         monitor.onRawLine = { [weak self] line in
             Task { @MainActor in
                 guard let self else { return }
@@ -92,7 +95,8 @@ final class AppState: ObservableObject {
             let applied = try audio.matchSampleRate(of: deviceID, toSourceRate: format.sampleRate)
             currentSampleRate = applied
             let bitText = format.bitDepth.map { "\($0)-bit/" } ?? ""
-            statusMessage = "Matched \(bitText)\(Int(format.sampleRate)) Hz → device now at \(Int(applied)) Hz"
+            let renditionText = format.rendition.map { " (\($0))" } ?? ""
+            statusMessage = "Matched \(bitText)\(Int(format.sampleRate)) Hz\(renditionText) → device now at \(Int(applied)) Hz"
         } catch {
             statusMessage = "Rate switch failed: \(error.localizedDescription)"
         }
